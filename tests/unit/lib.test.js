@@ -2,7 +2,7 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import {
   CHOICES, SWIPE_THRESHOLD, esc, cleanName, mediaLabel, choiceFromDrag, dragProgress, titleKey, fromTmdb, posterUrl,
-  recSeeds, recommend, becauseText, favouriteActors, quality, seededRandom, daySeed, RECENT_SEEDS, SAMPLE_SEEDS,
+  recSeeds, recommend, becauseText, favouriteActors, quality, seededRandom, daySeed, keyedNoise, RECENT_SEEDS, SAMPLE_SEEDS,
   detailsFromTmdb, runtimeText, imdbRating, latestWork, faceUrl, CAST_LIMIT,
   inLanguages, FEEDS, RECENT_PAGES, CLASSIC_PAGES, feedRequest, yearsAgo, feedMediaType, buildDeck, choicesFor, matches, onlyWants, watchedList, myList, isMatch, partnerNote, STARTER, hue,
 } from "../../lib.js";
@@ -344,6 +344,18 @@ describe("For you two", () => {
     const order = (n) => recommend(seeds, () => list, { rand: seededRandom(n) }).map((r) => r.t.title).join();
     assert.equal(order(5), order(5));
     assert.ok(new Set([1, 2, 3, 4, 5, 6].map(order)).size > 1, "different days, different order");
+  });
+
+  test("keyed noise: same title, same nudge, whatever else is in the list", () => {
+    const n = keyedNoise(7);
+    assert.equal(n("movie:1"), n("movie:1"));
+    assert.notEqual(n("movie:1"), n("movie:2"));
+    assert.notEqual(n("movie:1"), keyedNoise(8)("movie:1"));
+    const seeds = { pos: [{ t: { key: "s", title: "S" }, weight: 1, who: ["u1"] }], neg: [] };
+    const list = Array.from({ length: 10 }, (_, i) => rec(i + 1, { rating: 8 }));
+    const full = recommend(seeds, () => list, { noise: keyedNoise(3) }).map((r) => r.t.title);
+    const fewer = recommend(seeds, () => list.filter((t) => t.title !== full[0]), { noise: keyedNoise(3) }).map((r) => r.t.title);
+    assert.deepEqual(fewer, full.slice(1), "removing one title keeps the rest in the same order");
   });
 
   test("recommend copes with missing lists", () => {

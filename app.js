@@ -3,7 +3,7 @@ import { SUPABASE_URL, SUPABASE_KEY, USERNAME_EMAIL_DOMAIN, TMDB_KEY, TMDB_REGIO
 import {
   CHOICES, esc, cleanName, mediaLabel, choiceFromDrag, dragProgress, titleKey, fromTmdb, posterUrl, faceUrl,
   detailsFromTmdb, imdbRating, latestWork, recSeeds, recommend, becauseText, inLanguages,
-  favouriteActors, seededRandom, daySeed,
+  favouriteActors, seededRandom, daySeed, keyedNoise,
   feedRequest, feedMediaType, buildDeck, choicesFor, matches, onlyWants, watchedList, myList,
   partnerNote, STARTER, hue,
 } from "./lib.js";
@@ -214,7 +214,8 @@ let recSalt = 0;               // 🎲 Shuffle bumps this for a different mix to
 
 async function refreshRecs() {
   if (!TMDB_KEY || !state.user) return;
-  const rand = seededRandom(daySeed(new Date(), recSalt));
+  const day = daySeed(new Date(), recSalt);
+  const rand = seededRandom(day);
   const seeds = recSeeds(state.titles, state.swipes, memberIds(), { rand });
   const keep = (x) => x && inLanguages(x, LANGUAGES);
   await Promise.all([...seeds.pos, ...seeds.neg].filter((s) => !seedInfo.has(s.t.key)).map(async ({ t }) => {
@@ -242,9 +243,8 @@ async function refreshRecs() {
   }));
   const mine = new Set(state.swipes.filter((x) => x.user_id === state.user.id).map((x) => x.title_id));
   const exclude = new Set(state.titles.filter((t) => mine.has(t.id)).map((t) => t.key));
-  recs = recommend(seeds, (k) => seedInfo.get(k)?.recs, { exclude, actors, workFor: (id) => actorWork.get(id), rand });
+  recs = recommend(seeds, (k) => seedInfo.get(k)?.recs, { exclude, actors, workFor: (id) => actorWork.get(id), noise: keyedNoise(day) });
   recReason = new Map(recs.map((r) => [r.t.key, becauseText(r.because, state.user.id, nameOf, state.members.length)]));
-  rendered = "";
   renderDeck();
   renderForYou();
 }
@@ -351,6 +351,12 @@ function currentDeck(filter = state.filter) {
   const feed = [...recs.map((r) => r.t), ...feedFor(filter).items];
   const deck = buildDeck({ titles: state.titles, swipes: state.swipes, feed, userId: state.user.id, filter })
     .filter((t) => !state.pending.has(t.key));
+  // Once you're swiping, cards already on screen keep their places, so new data (a save,
+  // a partner's swipe, updated recommendations) never swaps out the card you're about to see.
+  // Before the first swipe the deck is still loading, so recommendations may take the top.
+  const onScreen = swiping && shown.filter === filter ? shown.keys : [];
+  const at = (t) => { const i = onScreen.indexOf(t.key); return i < 0 ? Infinity : i; };
+  deck.sort((a, b) => at(a) - at(b));
   if (state.front) {
     const i = deck.findIndex((t) => t.key === state.front);
     if (i > 0) deck.unshift(...deck.splice(i, 1));
@@ -360,7 +366,8 @@ function currentDeck(filter = state.filter) {
 
 let drag = null;      // the drag in progress, if any
 let flying = false;   // a card is animating off-screen
-let rendered = "";    // keys on screen, so live updates don't rebuild the same cards
+let shown = { filter: null, keys: [] };   // cards on screen, top first
+let swiping = false;                       // set by the first swipe this session
 
 async function renderDeck() {
   const el = $("#deck");
@@ -369,21 +376,55 @@ async function renderDeck() {
   let deck = currentDeck(filter);
   const f = feedFor(filter);
   if (deck.length < DECK_MIN && !f.done) {
-    if (!deck.length) { el.innerHTML = `<div class="empty muted">Loading…</div>`; rendered = ""; }
+    if (!deck.length) { el.innerHTML = `<div class="empty muted">Loading…</div>`; shown = { filter, keys: [] }; }
     if (!f.loading) loadMore(filter).then(() => state.filter === filter && renderDeck());
     if (!deck.length) return;
   }
 
   const show = deck.slice(0, 3);
-  show.slice(0, 2).forEach(ensureDetails);
-  const keys = show.map((t) => t.key + ":" + (partnerNoteFor(t) || "") + ":" + !!details.get(t.key)).join("|");
+  show.forEach(ensureDetails);
   $("#undo").disabled = !state.undo.length;
-  if (keys === rendered && el.childElementCount) return;
-  rendered = keys;
-  el.innerHTML = show.length
-    ? show.map((t, i) => cardHtml(t, i)).reverse().join("")
-    : `<div class="empty"><div class="big">🍿</div><p>You've swiped through everything${state.filter === "all" ? "" : ` in ${state.filter === "tv" ? "shows" : "movies"}`}.</p>
+  shown = { filter, keys: show.map((t) => t.key) };
+  if (!show.length) {
+    el.innerHTML = `<div class="empty"><div class="big">🍿</div><p>You've swiped through everything${filter === "all" ? "" : ` in ${filter === "tv" ? "shows" : "movies"}`}.</p>
        <p class="muted small">Try another filter, or tap 🔍 Find to add something.</p></div>`;
+    return;
+  }
+  // Reuse a card's element while what it shows is unchanged, so its poster never reloads;
+  // only its place in the stack is updated.
+  const old = new Map([...el.querySelectorAll(".mcard")].map((c) => [c.dataset.key, c]));
+  const cards = show.map((t, i) => {
+    const sig = cardSig(t);
+    let c = old.get(t.key);
+    if (!c || c.dataset.sig !== sig) {
+      const tpl = document.createElement("template");
+      tpl.innerHTML = cardHtml(t, i).trim();
+      c = tpl.content.firstElementChild;
+      c.dataset.sig = sig;
+    }
+    patchNote(c, partnerNoteFor(t) || recReason.get(t.key) || "");
+    c.style.setProperty("--i", i);
+    c.classList.toggle("top", i === 0);
+    if (i === 0) { c.tabIndex = 0; c.removeAttribute("aria-hidden"); c.setAttribute("aria-label", t.title); }
+    else { c.removeAttribute("tabindex"); c.setAttribute("aria-hidden", "true"); c.classList.remove("expanded"); }
+    return c;
+  });
+  const order = cards.slice().reverse();
+  if (order.length !== el.children.length || order.some((c, i) => el.children[i] !== c)) el.replaceChildren(...order);
+}
+
+// Changes only when the card's layout changes (details loading → loaded); notes are patched in place.
+const cardSig = (t) => (details.has(t.key) ? (details.get(t.key) ? "d" : "loading") : "none");
+
+function patchNote(card, text) {
+  let note = card.querySelector(".facts .note");
+  if (!text) return note?.remove();
+  if (!note) {
+    note = document.createElement("div");
+    note.className = "note";
+    card.querySelector(".facts").prepend(note);
+  }
+  if (note.textContent !== text) note.textContent = text;
 }
 
 const partnerNoteFor = (t) => (t.id ? partnerNote(state.swipes, t.id, state.user.id, nameOf) : "");
@@ -495,6 +536,7 @@ function fly(card, choice, dx, dy) {
 // Hides the card right away, then saves. The database adds the title to the
 // household the first time anyone swipes on it.
 async function commit(item, choice) {
+  swiping = true;
   if (state.front === item.key) state.front = null;
   const job = { key: item.key, choice, titleId: item.id ?? null };
   job.saved = sb.rpc("swipe", { p_title: titlePayload(item), p_choice: choice });
@@ -529,7 +571,6 @@ async function undo() {
   if (id) await sb.from("swipes").delete().eq("title_id", id).eq("user_id", state.user.id);
   state.pending.delete(job.key);
   state.front = job.key;
-  rendered = "";
   await loadData();
 }
 
@@ -623,8 +664,7 @@ async function onClick(e) {
   } else if (act === "unswipe") {
     await sb.from("swipes").delete().eq("title_id", id).eq("user_id", state.user.id);
     state.front = state.titles.find((t) => t.id === id)?.key ?? null;
-    rendered = "";
-    loadData();
+      loadData();
   }
 }
 

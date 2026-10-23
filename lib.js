@@ -270,6 +270,16 @@ export function seededRandom(seed) {
 }
 export const daySeed = (date, salt = 0) => Math.floor(date.getTime() / 864e5) * 31 + salt;
 
+// A random-looking number in [0, 1) per (seed, key): the same title gets the same nudge all
+// day, however the rest of the list changes.
+export function keyedNoise(seed) {
+  return (key) => {
+    let h = seed >>> 0;
+    for (const ch of String(key)) h = Math.imul(h ^ ch.codePointAt(0), 2654435761) >>> 0;
+    return seededRandom(h)();
+  };
+}
+
 // Seeds from household swipes: { pos, neg }, each [{ t, weight, who }].
 // pos = newest RECENT_SEEDS likes + a random SAMPLE_SEEDS of the older ones.
 // Only TMDB titles can be seeds (hand-added ones have no recommendations).
@@ -317,7 +327,7 @@ export function favouriteActors(pos, castFor, limit = ACTOR_LIMIT) {
 // recsFor(seedKey) → that seed's TMDB recommendations; workFor(actorId) → that person's work
 // (both already mapped with fromTmdb). exclude: keys not to suggest (already swiped).
 export function recommend({ pos, neg }, recsFor, {
-  exclude = new Set(), actors = [], workFor = () => [], rand = Math.random, limit = 40, thisYear = new Date().getFullYear(),
+  exclude = new Set(), actors = [], workFor = () => [], rand = Math.random, noise = () => rand(), limit = 40, thisYear = new Date().getFullYear(),
 } = {}) {
   const scored = new Map();
   const bump = (t, amount, why) => {
@@ -332,7 +342,7 @@ export function recommend({ pos, neg }, recsFor, {
   for (const seed of neg) (recsFor(seed.t.key) ?? []).forEach((t, i) => bump(t, -NEG_FACTOR * seed.weight * rankWeight(i)));
   return [...scored.values()]
     .filter((c) => !(c.t.rating && c.t.rating < MIN_RATING))
-    .map((c) => ({ ...c, score: c.score * quality(c.t, thisYear) * (1 - JITTER / 2 + JITTER * rand()), because: c.because.sort((a, b) => b.amount - a.amount).slice(0, 2) }))
+    .map((c) => ({ ...c, score: c.score * quality(c.t, thisYear) * (1 - JITTER / 2 + JITTER * noise(c.t.key)), because: c.because.sort((a, b) => b.amount - a.amount).slice(0, 2) }))
     .filter((c) => c.score > 0 && c.because.length)
     .sort((a, b) => b.score - a.score || a.t.title.localeCompare(b.t.title))
     .slice(0, limit);

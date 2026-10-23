@@ -253,6 +253,48 @@ describe("card details + cast", () => {
   }));
 });
 
+describe("no flicker", () => {
+  // The card underneath must become the top card after a swipe: same title, same element
+  // (not rebuilt, so its poster doesn't reload), however many reloads and rec updates follow.
+  async function checkSteady(page, swipe) {
+    for (let round = 0; round < 4; round++) {
+      await page.waitForSelector("#deck .mcard:nth-last-child(2)");
+      const below = await page.evaluate(() => {
+        const el = document.querySelectorAll("#deck .mcard")[document.querySelectorAll("#deck .mcard").length - 2];
+        el.__marked = true;
+        return el.dataset.key;
+      });
+      const seen = [];
+      await page.exposeFunction(`__seen${round}`, (k) => seen.push(k)).catch(() => {});
+      await page.evaluate((round) => {
+        const deck = document.querySelector("#deck");
+        new MutationObserver(() => window[`__seen${round}`](deck.querySelector(".mcard.top")?.dataset.key)).observe(deck, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
+      }, round);
+      await swipe(page);
+      await page.waitForTimeout(900);
+      const top = await page.evaluate(() => ({ key: document.querySelector("#deck .mcard.top")?.dataset.key, marked: !!document.querySelector("#deck .mcard.top")?.__marked }));
+      assert.equal(top.key, below, `round ${round}: the card underneath became the top card`);
+      assert.ok(top.marked, `round ${round}: it wasn't rebuilt`);
+      assert.deepEqual([...new Set(seen.filter(Boolean))].filter((k) => k !== below), [], `round ${round}: no other title flashed on top`);
+    }
+  }
+
+  test("after swiping with buttons", () => withApp(baseSeed(), ({ page }) => checkSteady(page, (p) => p.click("[data-swipe=no]"))));
+
+  test("while recommendations keep changing", () => {
+    const seed = baseSeed();
+    seed.swipes.push({ title_id: "t1", user_id: "u2", household_id: "h1", choice: "liked", updated_at: "2026-10-02" });
+    return withApp(seed, ({ page }) => checkSteady(page, (p) => p.click("[data-swipe=liked]")));
+  });
+
+  test("when the partner swipes at the same time", () => withApp(baseSeed(), async ({ page, as }) => {
+    await checkSteady(page, async (p) => {
+      await p.click("[data-swipe=yes]");
+      await as("u2", async ({ rpc }) => rpc("swipe", { p_title: { key: `movie:${Math.random()}`, media_type: "movie", title: "Partner pick" }, p_choice: "yes" }));
+    });
+  }));
+});
+
 describe("for you two", () => {
   test("titles similar to what you both liked show in the deck and on Matches, with the reason", () => {
     const seed = baseSeed();
