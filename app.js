@@ -1,8 +1,9 @@
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.4/+esm";
-import { SUPABASE_URL, SUPABASE_KEY, USERNAME_EMAIL_DOMAIN, TMDB_KEY, TMDB_REGION, OMDB_KEY } from "./config.js";
+import { SUPABASE_URL, SUPABASE_KEY, USERNAME_EMAIL_DOMAIN, TMDB_KEY, TMDB_REGION, OMDB_KEY, LANGUAGES } from "./config.js";
 import {
   CHOICES, esc, cleanName, mediaLabel, choiceFromDrag, dragProgress, titleKey, fromTmdb, posterUrl, faceUrl,
-  detailsFromTmdb, imdbRating, latestWork, recSeeds, recommend, becauseText,
+  detailsFromTmdb, imdbRating, latestWork, recSeeds, recommend, becauseText, inLanguages,
+  favouriteActors, seededRandom, daySeed,
   feedRequest, feedMediaType, buildDeck, choicesFor, matches, onlyWants, watchedList, myList,
   partnerNote, STARTER, hue,
 } from "./lib.js";
@@ -203,28 +204,45 @@ async function loadData() {
 
 // ------------------------------------------------- "For you two" recs ----
 
-// TMDB recommendations per seed title key, fetched once per session.
-const recLists = new Map();
+// Per liked title: its TMDB recommendations and top cast, fetched once per session (one request each).
+const seedInfo = new Map();
+// Per favourite actor: their well-rated work.
+const actorWork = new Map();
 let recs = [];                 // [{ t, score, because }], best first
 let recReason = new Map();     // title key → "✨ Because …"
+let recSalt = 0;               // 🎲 Shuffle bumps this for a different mix today
 
 async function refreshRecs() {
   if (!TMDB_KEY || !state.user) return;
-  const seeds = recSeeds(state.titles, state.swipes, memberIds());
-  const missing = [...seeds.pos, ...seeds.neg].filter((s) => !recLists.has(s.t.key));
-  await Promise.all(missing.map(async ({ t }) => {
-    recLists.set(t.key, []);
+  const rand = seededRandom(daySeed(new Date(), recSalt));
+  const seeds = recSeeds(state.titles, state.swipes, memberIds(), { rand });
+  const keep = (x) => x && inLanguages(x, LANGUAGES);
+  await Promise.all([...seeds.pos, ...seeds.neg].filter((s) => !seedInfo.has(s.t.key)).map(async ({ t }) => {
+    seedInfo.set(t.key, { recs: [], cast: [] });
     try {
-      recLists.set(t.key, (await tmdb(`${t.media_type}/${t.tmdb_id}/recommendations`, { page: 1 }))
-        .map((r) => fromTmdb(r, r.media_type ?? t.media_type)).filter(Boolean));
+      const d = await tmdbGet(`${t.media_type}/${t.tmdb_id}`, { append_to_response: "credits,recommendations" });
+      seedInfo.set(t.key, {
+        recs: (d.recommendations?.results ?? []).map((r) => fromTmdb(r, r.media_type ?? t.media_type)).filter(keep),
+        cast: (d.credits?.cast ?? []).slice(0, 6).map((c) => ({ id: c.id, name: c.name })),
+      });
     } catch (e) {
       console.warn("TMDB recommendations:", e.message);
-      recLists.delete(t.key);
+      seedInfo.delete(t.key);
+    }
+  }));
+  const actors = favouriteActors(seeds.pos, (k) => seedInfo.get(k)?.cast);
+  await Promise.all(actors.filter((a) => !actorWork.has(a.id)).map(async (a) => {
+    actorWork.set(a.id, []);
+    try {
+      actorWork.set(a.id, latestWork(await tmdbGet(`person/${a.id}/combined_credits`), 30).map((w) => w.t).filter(keep));
+    } catch (e) {
+      console.warn("TMDB person:", e.message);
+      actorWork.delete(a.id);
     }
   }));
   const mine = new Set(state.swipes.filter((x) => x.user_id === state.user.id).map((x) => x.title_id));
   const exclude = new Set(state.titles.filter((t) => mine.has(t.id)).map((t) => t.key));
-  recs = recommend(seeds, (k) => recLists.get(k), { exclude });
+  recs = recommend(seeds, (k) => seedInfo.get(k)?.recs, { exclude, actors, workFor: (id) => actorWork.get(id), rand });
   recReason = new Map(recs.map((r) => [r.t.key, becauseText(r.because, state.user.id, nameOf, state.members.length)]));
   rendered = "";
   renderDeck();
@@ -283,10 +301,10 @@ async function loadMore(filter) {
   f.loading = true;
   try {
     for (let tries = 0; tries < 3; tries++) {
-      const req = feedRequest(filter, f.n++);
+      const req = feedRequest(filter, f.n++, new Date(), LANGUAGES);
       if (!req) { f.done = true; break; }
       const results = await tmdb(req.path, req.params);
-      const items = results.map((r) => fromTmdb(r, feedMediaType(req.path) ?? r.media_type)).filter(Boolean);
+      const items = results.map((r) => fromTmdb(r, feedMediaType(req.path) ?? r.media_type)).filter((t) => t && inLanguages(t, LANGUAGES));
       f.items.push(...items);
       if (currentDeck(filter).length >= DECK_MIN) break;
     }
@@ -394,12 +412,12 @@ function cardHtml(t, i) {
           ${d?.genres.length ? `<div class="genres">${d.genres.map((g) => `<span>${esc(g)}</span>`).join("")}</div>` : ""}
         </div>
       </div>
-      ${overview ? `<div class="lbl">Story</div><p class="overview">${esc(overview)}</p>` : ""}
-      ${cast.length ? `<div class="lbl">Cast <span>tap a face for their latest</span></div>
+      ${overview ? `<div class="lbl lbl-story">Story</div><p class="overview">${esc(overview)}</p>` : ""}
+      ${cast.length ? `<div class="lbl lbl-cast">Cast <span>tap a face for their latest</span></div>
       <div class="cast">${cast.map((c) => `<button type="button" class="face" data-person="${c.id}" data-name="${esc(c.name)}" data-face="${esc(c.face ?? "")}" aria-label="${esc(c.name)}: latest movies and shows">
         ${c.face ? `<img src="${esc(faceUrl(c.face))}" alt="" draggable="false" loading="lazy">` : `<span class="noface">${esc(c.name[0] ?? "?")}</span>`}
         <span class="n">${esc(c.name)}</span>${c.character ? `<span class="r">${esc(c.character)}</span>` : ""}</button>`).join("")}</div>`
-        : d === null ? `<div class="lbl">Cast</div><div class="cast loading">${"<span class=\"face\"><span class=\"noface\"></span></span>".repeat(3)}</div>` : ""}
+        : d === null ? `<div class="lbl lbl-cast">Cast</div><div class="cast loading">${"<span class=\"face\"><span class=\"noface\"></span></span>".repeat(3)}</div>` : ""}
     </div>
   </article>`;
 }
@@ -683,6 +701,7 @@ function setupPerson() {
   dlg.addEventListener("close", () => renderDeck());
   bindPickList($("#credits"));
   bindPickList($("#for-you"));
+  $("#shuffle").addEventListener("click", () => { recSalt++; refreshRecs(); });
 }
 
 async function openPerson({ person, name, face }) {

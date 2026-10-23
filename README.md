@@ -16,9 +16,12 @@ A swipe app for two people sharing a couch. Each of you swipes through movies an
   plus ↶ undo. **🔍 Find** searches for a specific title.
 - **💕 Matches**: everything you *both* swiped right on, shown live on both phones with an "It's a match!" toast.
   🎲 **Pick one** chooses for tonight. Below that: what your partner wants that you haven't said yes to, and what only you want.
-- **✨ For you two**: titles similar to what either of you liked (TMDB recommendations for each ♥/👍), ranked so that
-  things you *both* liked, and things you liked after watching, count most; anything similar to what you rejected sinks.
-  They appear in the deck with a "✨ Because you both liked …" note, and as a list on the Matches tab. No AI, no server.
+- **✨ For you two**: titles similar to what either of you liked (TMDB recommendations for each ♥/👍), plus other work by
+  actors who keep showing up in your likes. Things you *both* liked, and things you liked after watching, count most;
+  ratings count a lot (under 5.5 is dropped); anything similar to what you rejected sinks. It mixes your newest likes
+  with a rotating sample of older ones and reshuffles daily (or tap 🎲 Shuffle), so it doesn't get stuck. Suggestions
+  appear in the deck with a "✨ Because you both liked …" or "✨ With <actor>, from …" note, and as a list on the
+  Matches tab. Only English and Hindi titles are suggested (`LANGUAGES` in `config.js`). No AI, no server.
 - **🎬 Watched**: everything either of you has seen, with each person's 👍/👎.
 - **📋 My lists**: your own Want / Liked / Didn't / Nope lists. Change your mind, or ↺ put a title back in your deck.
 
@@ -65,6 +68,9 @@ npm run test:ui    # swipes through the real page in headless Chrome at phone si
 ```
 
 - `tests/unit/` tests the pure helpers in `lib.js` with Node's built-in test runner.
+- `tests/ui/layout.test.js` loads worst-case content (very long titles, names and stories) at 11 screen sizes, from a
+  320px iPhone SE through landscape phones to a 1440px desktop, and fails if anything is cut off, half-clipped,
+  overlapping, too small to tap, hidden behind the tab bar, or makes the page scroll sideways.
 - `tests/ui/` drives `index.html` with Playwright against `tests/ui/fake-supabase.js` (an in-memory stand-in that
   mirrors the database rules) and `tests/ui/fake-tmdb.js`, so nothing real is touched.
 - `tests/db/db_test.sql` checks row-level security on the real database. Paste it into the Supabase SQL Editor and

@@ -48,6 +48,7 @@ export function fromTmdb(r, mediaType = r.media_type) {
     poster: r.poster_path ?? null,
     overview: r.overview || null,
     rating: typeof r.vote_average === "number" && r.vote_count > 20 ? Math.round(r.vote_average * 10) / 10 : null,
+    lang: r.original_language ?? null,
   };
 }
 
@@ -112,12 +113,17 @@ export const FEEDS = {
 };
 export const feedMediaType = (path) => (/(^|\/)movie(\/|$)/.test(path) ? "movie" : /(^|\/)tv(\/|$)/.test(path) ? "tv" : undefined);
 
-// Popular titles released since `since` ("YYYY-MM-DD"), with enough votes to mean something.
-function recentParams(path, since) {
-  if (path === "discover/movie") return { sort_by: "popularity.desc", "primary_release_date.gte": since, "vote_count.gte": "100" };
-  if (path === "discover/tv") return { sort_by: "popularity.desc", "first_air_date.gte": since, "vote_count.gte": "30" };
+// Popular titles released since `since` ("YYYY-MM-DD"), with enough votes to mean something,
+// in the given original languages (TMDB treats "en|hi" as either).
+function recentParams(path, since, langs) {
+  const lang = langs.length ? { with_original_language: langs.join("|") } : {};
+  if (path === "discover/movie") return { sort_by: "popularity.desc", "primary_release_date.gte": since, "vote_count.gte": "100", ...lang };
+  if (path === "discover/tv") return { sort_by: "popularity.desc", "first_air_date.gte": since, "vote_count.gte": "30", ...lang };
   return {};
 }
+
+// Lists that can't be filtered on TMDB's side are filtered here. Unknown language passes.
+export const inLanguages = (t, langs) => !langs?.length || !t.lang || langs.includes(t.lang);
 
 export function yearsAgo(today, n) {
   const d = new Date(today.getFullYear() - n, today.getMonth(), today.getDate());
@@ -125,12 +131,12 @@ export function yearsAgo(today, n) {
 }
 
 // The n-th request to make for a filter: { path, params } with the page number, or null when done.
-export function feedRequest(filter, n, today = new Date()) {
+export function feedRequest(filter, n, today = new Date(), langs = []) {
   const { recent, classic } = FEEDS[filter];
   const since = yearsAgo(today, RECENT_YEARS);
   if (n < recent.length * RECENT_PAGES) {
     const path = recent[n % recent.length];
-    return { path, params: { ...recentParams(path, since), page: Math.floor(n / recent.length) + 1 } };
+    return { path, params: { ...recentParams(path, since, langs), page: Math.floor(n / recent.length) + 1 } };
   }
   const m = n - recent.length * RECENT_PAGES;
   if (m >= classic.length * CLASSIC_PAGES) return null;
@@ -228,23 +234,46 @@ export function partnerNote(swipes, titleId, userId, nameOf) {
 
 // ------------------------------------------------- "For you two" recs ----
 //
-// Every title one of you liked is a seed. TMDB's "recommendations" for each seed are
-// candidates; a candidate's score adds up how strongly it was recommended (higher in a
-// seed's list counts more) times how much you liked that seed. Liked-after-watching counts
-// more than "want to watch", and a seed you BOTH like counts extra. Titles recommended by
-// things you said no to, or watched and disliked, lose points.
+// Every title one of you liked is a seed. Candidates come from two places:
+//   1. TMDB's "recommendations" for each seed (higher in the list counts more), and
+//   2. other work by favourite actors: people billed high in several things you liked.
+// A candidate's score adds up how much you liked what led to it. Liked-after-watching counts
+// more than "want to watch", and a seed you BOTH like counts extra. Things recommended by
+// titles you rejected lose points. Ratings matter a lot: weakly rated titles barely surface.
+// To keep it fresh, the seeds mix your newest likes with a random handful of older ones, and
+// scores get a little random jitter. The randomness is seeded per day, so the deck is stable
+// while you swipe but different tomorrow (or after 🎲 Shuffle).
 
-export const SEED_LIMIT = 15;
+export const RECENT_SEEDS = 8;
+export const SAMPLE_SEEDS = 7;
 export const NEG_SEED_LIMIT = 8;
+export const ACTOR_LIMIT = 3;
 const POSITIVE = { liked: 2, yes: 1.2 };
 const NEGATIVE = { disliked: 1.5, no: 1 };
 const BOTH_BONUS = 1.5;
 const NEG_FACTOR = 0.6;
+const ACTOR_WEIGHT = 0.7;
+const JITTER = 0.4;
+const MIN_RATING = 5.5;
 const rankWeight = (i) => 1 / (1 + i / 5);
 
-// Seeds from household swipes: { pos, neg }, each [{ t, weight, who }] newest first.
+// Small deterministic random generator (mulberry32), so a day's suggestions don't jump around.
+export function seededRandom(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+export const daySeed = (date, salt = 0) => Math.floor(date.getTime() / 864e5) * 31 + salt;
+
+// Seeds from household swipes: { pos, neg }, each [{ t, weight, who }].
+// pos = newest RECENT_SEEDS likes + a random SAMPLE_SEEDS of the older ones.
 // Only TMDB titles can be seeds (hand-added ones have no recommendations).
-export function recSeeds(titles, swipes, memberIds) {
+export function recSeeds(titles, swipes, memberIds, { rand = Math.random } = {}) {
   const pos = [], neg = [];
   for (const { t, ss } of withSwipes(titles, swipes)) {
     if (!t.tmdb_id || !ss.length) continue;
@@ -260,42 +289,69 @@ export function recSeeds(titles, swipes, memberIds) {
       if (weight) neg.push({ t, weight, who: mine.map((s) => s.user_id), last });
     }
   }
-  const newest = (a, b) => b.last.localeCompare(a.last);
-  return { pos: pos.sort(newest).slice(0, SEED_LIMIT), neg: neg.sort(newest).slice(0, NEG_SEED_LIMIT) };
+  const newest = (a, b) => b.last.localeCompare(a.last) || a.t.key.localeCompare(b.t.key);
+  pos.sort(newest);
+  const older = pos.slice(RECENT_SEEDS).map((p) => [rand(), p]).sort((a, b) => a[0] - b[0]).map(([, p]) => p);
+  return { pos: [...pos.slice(0, RECENT_SEEDS), ...older.slice(0, SAMPLE_SEEDS)], neg: neg.sort(newest).slice(0, NEG_SEED_LIMIT) };
 }
 
-// recsFor(seedKey) → that seed's TMDB recommendations (already mapped with fromTmdb).
-// exclude: keys not to suggest (already swiped, or the seeds themselves).
-export function recommend({ pos, neg }, recsFor, { exclude = new Set(), limit = 40, thisYear = new Date().getFullYear() } = {}) {
+// castFor(seedKey) → [{ id, name }] in billing order. Favourite actors are the ones billed
+// high across your liked seeds: [{ id, name, weight, who, from }] best first.
+export function favouriteActors(pos, castFor, limit = ACTOR_LIMIT) {
+  const byId = new Map();
+  for (const seed of pos) {
+    (castFor(seed.t.key) ?? []).slice(0, 6).forEach((c, i) => {
+      const a = byId.get(c.id) ?? { id: c.id, name: c.name, weight: 0, who: new Set(), from: [] };
+      a.weight += seed.weight / (1 + i);
+      seed.who.forEach((u) => a.who.add(u));
+      a.from.push(seed.t.title);
+      byId.set(c.id, a);
+    });
+  }
+  return [...byId.values()]
+    .sort((a, b) => b.from.length - a.from.length || b.weight - a.weight)
+    .slice(0, limit)
+    .map((a) => ({ ...a, who: [...a.who] }));
+}
+
+// recsFor(seedKey) → that seed's TMDB recommendations; workFor(actorId) → that person's work
+// (both already mapped with fromTmdb). exclude: keys not to suggest (already swiped).
+export function recommend({ pos, neg }, recsFor, {
+  exclude = new Set(), actors = [], workFor = () => [], rand = Math.random, limit = 40, thisYear = new Date().getFullYear(),
+} = {}) {
   const scored = new Map();
-  const bump = (t, amount, seed) => {
+  const bump = (t, amount, why) => {
     if (exclude.has(t.key)) return;
     const c = scored.get(t.key) ?? { t, score: 0, because: [] };
     c.score += amount;
-    if (seed && amount > 0) c.because.push({ title: seed.t.title, who: seed.who, amount });
+    if (why && amount > 0) c.because.push({ ...why, amount });
     scored.set(t.key, c);
   };
-  for (const seed of pos) (recsFor(seed.t.key) ?? []).forEach((t, i) => bump(t, seed.weight * rankWeight(i), seed));
+  for (const seed of pos) (recsFor(seed.t.key) ?? []).forEach((t, i) => bump(t, seed.weight * rankWeight(i), { kind: "title", title: seed.t.title, who: seed.who }));
+  for (const a of actors) (workFor(a.id) ?? []).forEach((t, i) => bump(t, ACTOR_WEIGHT * a.weight * rankWeight(i), { kind: "cast", title: a.name, from: a.from[0], who: a.who }));
   for (const seed of neg) (recsFor(seed.t.key) ?? []).forEach((t, i) => bump(t, -NEG_FACTOR * seed.weight * rankWeight(i)));
   return [...scored.values()]
-    .map((c) => ({ ...c, score: c.score * quality(c.t, thisYear), because: c.because.sort((a, b) => b.amount - a.amount).slice(0, 2) }))
+    .filter((c) => !(c.t.rating && c.t.rating < MIN_RATING))
+    .map((c) => ({ ...c, score: c.score * quality(c.t, thisYear) * (1 - JITTER / 2 + JITTER * rand()), because: c.because.sort((a, b) => b.amount - a.amount).slice(0, 2) }))
     .filter((c) => c.score > 0 && c.because.length)
     .sort((a, b) => b.score - a.score || a.t.title.localeCompare(b.t.title))
     .slice(0, limit);
 }
 
-// Small nudges: well-rated and recent titles rank a bit higher.
-function quality(t, thisYear) {
-  const rated = t.rating ? 0.8 + 0.2 * Math.min(t.rating, 9) / 9 : 0.9;
+// Rating matters a lot (8.5+ ≈ full marks, 6 ≈ a third); unrated titles sit in the middle-low.
+// Recent titles get a small bonus.
+export function quality(t, thisYear) {
+  const rated = t.rating ? Math.min(1.15, Math.max(0.15, (t.rating - 5) / 3.5)) : 0.45;
   const recent = t.year && t.year >= thisYear - 2 ? 1.1 : 1;
   return rated * recent;
 }
 
-// "✨ Because you both liked Panchayat & Kota Factory"
+// "✨ Because you both liked Panchayat & Kota Factory" or "✨ With Jitendra Kumar, from Panchayat"
 export function becauseText(because, userId, nameOf, memberCount) {
   if (!because?.length) return "";
   const [first] = because;
-  const same = because.filter((b) => b.who.length === first.who.length && b.who.every((u) => first.who.includes(u)));
+  if (first.kind === "cast") return `✨ With ${first.title}${first.from ? `, from ${first.from}` : ""}`;
+  const same = because.filter((b) => b.kind !== "cast" && b.who.length === first.who.length && b.who.every((u) => first.who.includes(u)));
   const who = memberCount >= 2 && first.who.length >= memberCount ? "you both"
     : first.who.includes(userId) ? "you" : nameOf(first.who[0]);
   return `✨ Because ${who} liked ${same.map((b) => b.title).join(" & ")}`;

@@ -15,13 +15,8 @@ export function tmdbResponse(url) {
       { id: 5, media_type: "person", name: "Some Actor" },
     ] };
   }
-  const recs = path.match(/^(movie|tv)\/(\d+)\/recommendations$/);
-  if (recs) return { results: Number(recs[2]) === 27205
-    ? [{ id: 7001, media_type: "movie", title: "Interstellar", release_date: "2014-11-05", vote_average: 8.4, vote_count: 30000 },
-       { id: 7002, media_type: "movie", title: "Tenet", release_date: "2020-08-22", vote_average: 7.2, vote_count: 9000 }]
-    : [{ id: 7002, media_type: "movie", title: "Tenet", release_date: "2020-08-22", vote_average: 7.2, vote_count: 9000 }] };
   const det = path.match(/^(movie|tv)\/(\d+)$/);
-  if (det) return details(det[1], Number(det[2]));
+  if (det) return { ...details(det[1], Number(det[2])), recommendations: { results: recommendationsFor(Number(det[2])) } };
   const person = path.match(/^person\/(\d+)\/combined_credits$/);
   if (person) return personCredits(Number(person[1]));
   const li = LISTS.indexOf(path);
@@ -35,11 +30,20 @@ export function tmdbResponse(url) {
       ? { id, media_type: mt, name, first_air_date: "2020-01-01", poster_path: null, overview: `About ${name}`, vote_average: 7.5, vote_count: 500 }
       : { id, media_type: mt, title: name, release_date: "2021-05-05", poster_path: `/p${id}.jpg`, overview: `About ${name}`, vote_average: 7.1, vote_count: 900 };
   });
+  // One Japanese title per trending page, which the language filter should drop.
+  if (path === "trending/all/week") results.push({ id: 100000 + page * 10 + 9, media_type: "tv", name: `Anime ${page}`, original_language: "ja", first_air_date: "2023-10-22", vote_average: 8.7, vote_count: 900 });
   return { page, results };
 }
 
 // Details with credits + external_ids, as asked for with append_to_response.
+// Id 4242 is the worst case for layout tests: long everything.
 function details(mediaType, id) {
+  if (id === 4242) return {
+    id, overview: "A very long story. ".repeat(40), runtime: 201, imdb_id: "tt4242",
+    genres: [{ name: "Science Fiction" }, { name: "Documentary" }, { name: "Romance" }],
+    credits: { cast: ["Venkata Subramaniam Krishnamurthy-Ramachandran", "Bartholomew Montgomery-Fitzwilliam III", "Xi", "Anastasia Konstantinopoulou"]
+      .map((name, k) => ({ id: 4300 + k, name, character: k === 2 ? null : "The Extraordinarily Long-Named Supporting Character", profile_path: k === 1 ? null : `/face${k}.jpg` })) },
+  };
   const cast = Array.from({ length: 8 }, (_, k) => ({ id: 900 + k, name: `Actor ${id % 1000}-${k}`, character: `Role ${k}`, profile_path: k === 3 ? null : `/face${k}.jpg` }));
   return {
     id, overview: `Full story of ${id}.`,
@@ -59,4 +63,13 @@ function personCredits(personId) {
     { id: 4, media_type: "tv", name: "Recent Show", first_air_date: "2025-06-01", character: "Narrator" },
     { id: 5, media_type: "movie", title: "Undated Film", release_date: "", character: "Cameo" },
   ] };
+}
+
+function recommendationsFor(id) {
+  return id === 27205
+    ? [{ id: 7001, media_type: "movie", title: "Interstellar", release_date: "2014-11-05", vote_average: 8.4, vote_count: 30000 },
+       { id: 7002, media_type: "movie", title: "Tenet", release_date: "2020-08-22", vote_average: 7.2, vote_count: 9000 },
+       { id: 7003, media_type: "movie", title: "Badly Rated", release_date: "2021-01-01", vote_average: 4.1, vote_count: 900 },
+       { id: 7004, media_type: "tv", name: "Some Anime", first_air_date: "2022-01-01", original_language: "ja", vote_average: 8.9, vote_count: 900 }]
+    : [];
 }

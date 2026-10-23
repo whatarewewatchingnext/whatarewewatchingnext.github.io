@@ -129,6 +129,11 @@ code { background: var(--chip); padding: 2px 6px; border-radius: 6px; font-size:
 /* Swipe screen: fills the space between header and tab bar, no page scroll */
 body.swiping { overflow: hidden; }
 body.swiping main { padding-bottom: 0; }
+/* Landscape phones are too short for the whole swipe screen: let the page scroll instead */
+@media (max-height: 500px) {
+  body.swiping { overflow: auto; }
+  body.swiping main { padding-bottom: calc(76px + env(safe-area-inset-bottom)); }
+}
 .swipe-view {
   display: flex; flex-direction: column; gap: 10px;
   height: calc(100dvh - 52px - 8px - 66px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
@@ -136,7 +141,7 @@ body.swiping main { padding-bottom: 0; }
 }
 .deck-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 #open-search { min-height: 40px; padding: 6px 12px; font-size: .9rem; }
-.deck { position: relative; flex: 1; min-height: 0; }
+.deck { position: relative; flex: 1; min-height: 0; container-type: size; }
 .deck .empty { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; padding: 24px; }
 .deck .empty .big { font-size: 3rem; }
 
@@ -155,34 +160,38 @@ body.swiping main { padding-bottom: 0; }
 .dcard .backdrop { position: absolute; inset: -30px; background-size: cover; background-position: center; filter: blur(28px) saturate(1.3); opacity: .45; pointer-events: none; }
 .dcard::after { content: ""; position: absolute; inset: 0; background: linear-gradient(rgb(23 19 28 / .2), #17131c 62%); pointer-events: none; }
 .dcard .body { position: relative; z-index: 1; height: 100%; display: flex; flex-direction: column; gap: 8px; padding: 14px 14px 12px; overflow: hidden; }
-.dcard .head { display: flex; gap: 14px; flex: 0 0 auto; }
+/* The card's height is fixed by the screen, so the poster gets whatever is left after the
+   story and cast rows (--fixed), and on shorter cards those rows shrink, then disappear. */
+.dcard { --fixed: 290px; }
+.dcard .head { display: flex; gap: 14px; flex: 0 0 auto; max-height: calc(100cqh - var(--fixed)); overflow: hidden; }
 .dcard .poster {
-  position: relative; flex: 0 0 46%; aspect-ratio: 2 / 3; border-radius: 12px; overflow: hidden;
+  position: relative; flex: 0 0 auto; width: min(46%, calc((100cqh - var(--fixed)) / 1.5)); aspect-ratio: 2 / 3; border-radius: 12px; overflow: hidden;
   background: linear-gradient(160deg, hsl(var(--h) 55% 50%), hsl(calc(var(--h) + 50) 50% 25%)); box-shadow: 0 6px 18px rgb(0 0 0 / .45);
 }
 .dcard .poster img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; pointer-events: none; z-index: 1; }
 .dcard .poster .ph { position: absolute; inset: 0; display: grid; place-items: center; font-size: 3rem; }
-.dcard .facts { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; padding-top: 2px; }
-.dcard h2 { font-size: 1.4rem; line-height: 1.12; margin: 0; overflow-wrap: anywhere; }
+.dcard .facts { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; padding-top: 2px; overflow: hidden; }
+.dcard .facts > * { flex: 0 0 auto; }
+.dcard h2 { font-size: 1.4rem; line-height: 1.12; margin: 0; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .dcard .meta { font-size: .88rem; opacity: .85; }
-.dcard .note { align-self: flex-start; background: rgb(255 255 255 / .16); border-radius: 999px; padding: 3px 10px; font-size: .78rem; }
+.dcard .note { align-self: flex-start; max-width: 100%; background: rgb(255 255 255 / .16); border-radius: 12px; padding: 3px 10px; font-size: .78rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .badge-imdb, .badge-tmdb { display: inline-flex; align-items: center; gap: 5px; border-radius: 6px; padding: 2px 8px; font-weight: 800; font-size: .9rem; }
 .badge-imdb { background: #f5c518; color: #000; }
 .badge-imdb b { font-family: Impact, "Arial Black", sans-serif; font-size: .8rem; letter-spacing: .02em; }
 .badge-tmdb { background: #0d253f; color: #fff; border: 1px solid #01b4e4; }
 .badge-tmdb b { color: #01b4e4; font-size: .74rem; }
-.dcard .genres { display: flex; flex-wrap: wrap; gap: 5px; }
-.dcard .genres span { background: rgb(255 255 255 / .14); border-radius: 999px; padding: 2px 9px; font-size: .76rem; }
-.dcard .lbl { font-size: .7rem; text-transform: uppercase; letter-spacing: .09em; opacity: .55; margin-top: 2px; }
+/* One row of genres; any that don't fit are left out rather than wrapping */
+.dcard .genres { display: flex; flex-wrap: wrap; gap: 5px; height: 22px; overflow: hidden; }
+.dcard .genres span { background: rgb(255 255 255 / .14); border-radius: 999px; padding: 2px 9px; font-size: .76rem; white-space: nowrap; }
+.dcard .lbl { font-size: .7rem; text-transform: uppercase; letter-spacing: .09em; opacity: .55; margin-top: 2px; flex: 0 0 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dcard .lbl span { text-transform: none; letter-spacing: 0; opacity: .8; margin-left: 4px; }
 .dcard .overview {
-  margin: -2px 0 0; font-size: .88rem; line-height: 1.4; opacity: .92;
+  margin: -2px 0 0; font-size: .88rem; line-height: 1.4; opacity: .92; overflow-wrap: anywhere;
   display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; flex: 0 0 auto;
 }
-.dcard.expanded .overview { -webkit-line-clamp: 12; }
 .dcard .cast { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; flex: 0 0 auto; }
 .dcard .face {
-  display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 2px 0; border: 0; border-radius: 12px;
+  display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 2px 0; border: 0; border-radius: 12px; min-height: 0;
   background: none; color: #fff; font-size: .74rem; line-height: 1.15; text-align: center; min-width: 0;
 }
 .dcard .face img, .dcard .face .noface {
@@ -193,30 +202,52 @@ body.swiping main { padding-bottom: 0; }
 .dcard .face .r { opacity: .6; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dcard .cast.loading .noface { animation: pulse 1.2s ease-in-out infinite; }
 @keyframes pulse { 50% { opacity: .4; } }
-/* Shorter phones: smaller poster, two lines of story */
-@media (max-height: 760px) {
-  .dcard .poster { flex-basis: 38%; }
+/* Tapped: the story takes the cast's place */
+.dcard.expanded .cast, .dcard.expanded .lbl-cast { display: none; }
+.dcard.expanded .overview { -webkit-line-clamp: unset; display: block; flex: 1 1 0; min-height: 0; -webkit-mask-image: linear-gradient(#000 calc(100% - 2em), transparent); mask-image: linear-gradient(#000 calc(100% - 2em), transparent); }
+/* Shorter cards: smaller faces, one-line names, two lines of story… */
+@container (max-height: 560px) {
+  .dcard { --fixed: 225px; }
   .dcard .overview { -webkit-line-clamp: 2; }
-  .dcard .face img, .dcard .face .noface { width: 60px; height: 60px; }
+  .dcard .face img, .dcard .face .noface { width: 56px; height: 56px; font-size: 1.1rem; }
+  .dcard .face .n { -webkit-line-clamp: 1; }
+  .dcard .face .r { display: none; }
 }
-@media (max-height: 640px) {
-  .dcard .poster { flex-basis: 34%; }
-  .dcard .lbl:first-of-type, .dcard .overview { display: none; }
+/* …then no story… */
+@container (max-height: 400px) {
+  .dcard { --fixed: 150px; }
+  .dcard h2 { font-size: 1.15rem; -webkit-line-clamp: 2; }
+  .dcard .facts { gap: 5px; }
+  .dcard .genres { display: none; }
+  .dcard .lbl-story, .dcard .overview { display: none; }
+}
+/* …then no cast (landscape phones); tap the card for the story */
+@container (max-height: 290px) {
+  .dcard { --fixed: 40px; }
+  .dcard .cast, .dcard .lbl-cast { display: none; }
 }
 
 /* Person sheet */
-dialog.sheet {
-  width: min(560px, calc(100vw - 24px)); max-height: calc(100dvh - 48px); margin: auto;
+dialog.sheet, dialog#search {
+  width: min(560px, calc(100vw - 24px)); max-height: calc(100dvh - 32px); margin: auto;
   border: 1px solid var(--border); border-radius: 16px; padding: 14px; background: var(--card); color: var(--text);
 }
-dialog.sheet::backdrop { background: rgb(0 0 0 / .45); }
+dialog.sheet::backdrop, dialog#search::backdrop { background: rgb(0 0 0 / .45); }
 .person-head { display: flex; align-items: center; gap: 14px; }
 .person-head img { width: 84px; height: 84px; border-radius: 50%; object-fit: cover; background: var(--chip); }
 .person-head h2 { margin: 0; }
-#credits { max-height: calc(100dvh - 240px); overflow-y: auto; }
+/* Sheets: header and Done stay put, the list in between scrolls */
+dialog.sheet[open], dialog#search[open] { display: flex; flex-direction: column; overflow: hidden; }
+dialog.sheet .list, dialog#search .list { flex: 1 1 auto; min-height: 0; max-height: none; overflow-y: auto; margin: 8px 0; }
+dialog.sheet > *, dialog#search > * { flex-shrink: 0; }
 /* Search results and someone's latest work: buttons go under the title so it has room */
 #credits li, #results li { flex-wrap: wrap; row-gap: 6px; }
 #credits .choices, #results .choices { flex-basis: 100%; padding-left: 56px; }
+/* Phones: same for every list, so long titles never get squeezed into a sliver */
+@media (max-width: 600px) {
+  .list li:has(.choices) { flex-wrap: wrap; row-gap: 6px; }
+  .list li .choices { flex-basis: 100%; padding-left: 56px; order: 3; }
+}
 
 .stamp {
   position: absolute; z-index: 2; opacity: 0; pointer-events: none;
@@ -240,15 +271,17 @@ dialog.sheet::backdrop { background: rgb(0 0 0 / .45); }
 .act.liked { border-color: color-mix(in srgb, var(--liked) 45%, var(--border)); }
 .act.disliked { border-color: color-mix(in srgb, var(--disliked) 45%, var(--border)); }
 .act.undo { width: 42px; height: 42px; font-size: 1.1rem; color: var(--muted); }
-.hint { margin: 0; text-align: center; font-size: .75rem; color: var(--muted); }
-
-/* Search sheet */
-dialog#search {
-  width: min(560px, calc(100vw - 24px)); max-height: calc(100dvh - 48px); margin: auto;
-  border: 1px solid var(--border); border-radius: 16px; padding: 14px; background: var(--card); color: var(--text);
+.act { flex: 0 0 auto; }
+/* Narrow phones (iPhone SE): slightly smaller buttons so all five fit at a tappable size */
+@media (max-width: 360px) {
+  .actions { gap: 8px; }
+  .act { width: 50px; height: 50px; font-size: 1.3rem; }
+  .act.yes { width: 56px; height: 56px; font-size: 1.6rem; }
+  .act.undo { width: 40px; height: 40px; }
 }
-dialog#search::backdrop { background: rgb(0 0 0 / .45); }
-#results { max-height: calc(100dvh - 200px); overflow-y: auto; }
+.hint { margin: 0; text-align: center; font-size: .75rem; color: var(--muted); }
+/* Short screens: the buttons already say it, give the card the room */
+@media (max-height: 600px) { .hint { display: none; } }
 
 /* Toast */
 #toast {

@@ -2,9 +2,9 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import {
   CHOICES, SWIPE_THRESHOLD, esc, cleanName, mediaLabel, choiceFromDrag, dragProgress, titleKey, fromTmdb, posterUrl,
-  recSeeds, recommend, becauseText, SEED_LIMIT,
+  recSeeds, recommend, becauseText, favouriteActors, quality, seededRandom, daySeed, RECENT_SEEDS, SAMPLE_SEEDS,
   detailsFromTmdb, runtimeText, imdbRating, latestWork, faceUrl, CAST_LIMIT,
-  FEEDS, RECENT_PAGES, CLASSIC_PAGES, feedRequest, yearsAgo, feedMediaType, buildDeck, choicesFor, matches, onlyWants, watchedList, myList, isMatch, partnerNote, STARTER, hue,
+  inLanguages, FEEDS, RECENT_PAGES, CLASSIC_PAGES, feedRequest, yearsAgo, feedMediaType, buildDeck, choicesFor, matches, onlyWants, watchedList, myList, isMatch, partnerNote, STARTER, hue,
 } from "../../lib.js";
 
 const title = (id, name, extra = {}) => ({ id, key: `movie:${id}`, media_type: "movie", title: name, created_at: "2026-10-01", ...extra });
@@ -58,7 +58,7 @@ describe("titleKey / fromTmdb / posterUrl", () => {
   });
   test("maps a movie result", () => {
     assert.deepEqual(fromTmdb({ id: 1, title: "Up", release_date: "2009-05-29", poster_path: "/up.jpg", overview: "Balloons", vote_average: 8.03, vote_count: 100 }, "movie"), {
-      key: "movie:1", media_type: "movie", tmdb_id: 1, title: "Up", year: 2009, poster: "/up.jpg", overview: "Balloons", rating: 8,
+      key: "movie:1", media_type: "movie", tmdb_id: 1, title: "Up", year: 2009, poster: "/up.jpg", overview: "Balloons", rating: 8, lang: null,
     });
   });
   test("maps a tv result using media_type from the result", () => {
@@ -104,6 +104,14 @@ describe("feedRequest", () => {
     assert.equal(first[1].params["primary_release_date.gte"], "2024-10-21");
     assert.equal(first[2].params["first_air_date.gte"], "2024-10-21");
     assert.equal(first[1].params.sort_by, "popularity.desc");
+  });
+  test("languages: discover asks TMDB, other lists are filtered here", () => {
+    assert.equal(feedRequest("all", 1, today, ["en", "hi"]).params.with_original_language, "en|hi");
+    assert.equal(feedRequest("all", 1, today).params.with_original_language, undefined);
+    assert.equal(inLanguages({ lang: "ja" }, ["en", "hi"]), false);
+    assert.equal(inLanguages({ lang: "hi" }, ["en", "hi"]), true);
+    assert.equal(inLanguages({ lang: null }, ["en", "hi"]), true);
+    assert.equal(inLanguages({ lang: "ja" }, []), true);
   });
   test("then the all-time lists, then done", () => {
     const n = FEEDS.all.recent.length * RECENT_PAGES;
@@ -241,7 +249,8 @@ describe("details", () => {
 
 describe("For you two", () => {
   const tm = (id, name, extra = {}) => title(id, name, { tmdb_id: Number(id.replace(/\D/g, "")) || 1, ...extra });
-  const rec = (n, extra = {}) => ({ key: `movie:${n}`, media_type: "movie", title: `Rec ${n}`, ...extra });
+  const rec = (n, extra = {}) => ({ key: `movie:${n}`, media_type: "movie", title: `Rec ${n}`, rating: 8.5, ...extra });
+  const still = () => 0.5;  // no jitter: 1 - 0.2 + 0.4 * 0.5 = 1
 
   test("seeds: likes are positive, both liking counts extra, no/disliked are negative", () => {
     const titles = [tm("s1", "Both liked"), tm("s2", "One wants"), tm("s3", "Nope"), tm("s4", "Mixed"), title("c", "Custom")];
@@ -261,10 +270,39 @@ describe("For you two", () => {
     assert.equal(neg[0].weight, 2.5);
   });
 
-  test("seeds are capped", () => {
-    const titles = Array.from({ length: SEED_LIMIT + 5 }, (_, i) => tm(`s${i + 1}`, `T${i}`));
-    const swipes = titles.map((t, i) => sw(t.id, "u1", "yes", `2026-10-${String(i + 1).padStart(2, "0")}`));
-    assert.equal(recSeeds(titles, swipes, ["u1", "u2"]).pos.length, SEED_LIMIT);
+  test("seeds: newest likes plus a random sample of older ones, different per random seed", () => {
+    const titles = Array.from({ length: 40 }, (_, i) => tm(`s${i + 1}`, `T${i}`));
+    const swipes = titles.map((t, i) => sw(t.id, "u1", "yes", `2026-${String(1 + Math.floor(i / 28)).padStart(2, "0")}-${String(1 + (i % 28)).padStart(2, "0")}`));
+    const a = recSeeds(titles, swipes, ["u1", "u2"], { rand: seededRandom(1) }).pos.map((p) => p.t.title);
+    const b = recSeeds(titles, swipes, ["u1", "u2"], { rand: seededRandom(2) }).pos.map((p) => p.t.title);
+    assert.equal(a.length, RECENT_SEEDS + SAMPLE_SEEDS);
+    assert.deepEqual(a.slice(0, RECENT_SEEDS), b.slice(0, RECENT_SEEDS), "the newest likes always count");
+    assert.deepEqual(a.slice(0, 3), ["T39", "T38", "T37"]);
+    assert.notDeepEqual(a.slice(RECENT_SEEDS), b.slice(RECENT_SEEDS), "older ones rotate");
+    assert.deepEqual(a, recSeeds(titles, swipes, ["u1", "u2"], { rand: seededRandom(1) }).pos.map((p) => p.t.title), "same seed, same pick");
+  });
+
+  test("seededRandom is deterministic and in [0, 1); daySeed changes daily", () => {
+    const r1 = seededRandom(42), r2 = seededRandom(42);
+    const xs = Array.from({ length: 50 }, () => r1());
+    assert.deepEqual(xs, Array.from({ length: 50 }, () => r2()));
+    assert.ok(xs.every((x) => x >= 0 && x < 1));
+    assert.equal(daySeed(new Date("2026-10-21T08:00:00Z")), daySeed(new Date("2026-10-21T20:00:00Z")));
+    assert.notEqual(daySeed(new Date("2026-10-21T08:00:00Z")), daySeed(new Date("2026-10-22T08:00:00Z")));
+    assert.notEqual(daySeed(new Date("2026-10-21T08:00:00Z"), 1), daySeed(new Date("2026-10-21T08:00:00Z"), 0));
+  });
+
+  test("favourite actors: billed high in several likes wins", () => {
+    const pos = [
+      { t: { key: "a", title: "A" }, weight: 3, who: ["u1", "u2"] },
+      { t: { key: "b", title: "B" }, weight: 1.2, who: ["u2"] },
+    ];
+    const cast = { a: [{ id: 1, name: "Star" }, { id: 2, name: "Only A" }], b: [{ id: 3, name: "Lead B" }, { id: 1, name: "Star" }] };
+    const fav = favouriteActors(pos, (k) => cast[k]);
+    assert.deepEqual(fav.map((f) => f.name), ["Star", "Only A", "Lead B"]);
+    assert.deepEqual(fav[0].from, ["A", "B"]);
+    assert.deepEqual(fav[0].who.sort(), ["u1", "u2"]);
+    assert.equal(favouriteActors(pos, () => undefined).length, 0);
   });
 
   test("recommend: shared recs rise, negatives sink, excluded and unseeded drop out", () => {
@@ -277,16 +315,35 @@ describe("For you two", () => {
       "movie:2": [rec(11), rec(13)],
       "movie:3": [rec(12), rec(14)],
     };
-    const out = recommend(seeds, (k) => lists[k], { exclude: new Set(["movie:99"]), thisYear: 2026 });
+    const out = recommend(seeds, (k) => lists[k], { exclude: new Set(["movie:99"]), thisYear: 2026, rand: still });
     assert.deepEqual(out.map((r) => r.t.title), ["Rec 11", "Rec 10", "Rec 13", "Rec 12"], "two seeds beat one; a negative seed sinks Rec 12");
     assert.deepEqual(out[0].because.map((b) => b.title), ["A", "B"], "strongest reason first");
     assert.ok(!out.some((r) => r.t.title === "Rec 14"), "only negative seeds → not suggested");
   });
 
-  test("recommend: rating and recency nudge ties", () => {
-    const seeds = { pos: [{ t: { key: "s", title: "S" }, weight: 1, who: ["u1"] }, { t: { key: "s2", title: "S2" }, weight: 1, who: ["u1"] }], neg: [] };
-    const lists = { s: [rec(1, { year: 2010, rating: 6 })], s2: [rec(2, { year: 2026, rating: 8.5 })] };
-    assert.deepEqual(recommend(seeds, (k) => lists[k], { thisYear: 2026 }).map((r) => r.t.title), ["Rec 2", "Rec 1"]);
+  test("recommend: a favourite actor's well-rated work comes in with its reason", () => {
+    const seeds = { pos: [{ t: { key: "s", title: "Panchayat" }, weight: 2, who: ["u1"] }], neg: [] };
+    const actors = [{ id: 7, name: "Jitendra Kumar", weight: 2, who: ["u1"], from: ["Panchayat"] }];
+    const out = recommend(seeds, () => [], { actors, workFor: (id) => (id === 7 ? [rec(1, { title: "Kota Factory" })] : []), rand: still });
+    assert.deepEqual(out.map((r) => r.t.title), ["Kota Factory"]);
+    assert.equal(becauseText(out[0].because, "u1", () => "", 2), "✨ With Jitendra Kumar, from Panchayat");
+  });
+
+  test("recommend: ratings matter a lot, and poorly rated titles are dropped", () => {
+    const seeds = { pos: [{ t: { key: "s", title: "S" }, weight: 1, who: ["u1"] }], neg: [] };
+    const list = [rec(1, { rating: 6.2 }), rec(2, { rating: 8.6 }), rec(3, { rating: 4.9 }), rec(4, { rating: null })];
+    const out = recommend(seeds, () => list, { rand: still, thisYear: 2026 }).map((r) => r.t.title);
+    assert.deepEqual(out, ["Rec 2", "Rec 1", "Rec 4"], "8.6 beats a higher-ranked 6.2; under 5.5 is gone");
+    assert.ok(quality({ rating: 8.5 }, 2026) > 2.5 * quality({ rating: 6 }, 2026));
+    assert.ok(quality({ rating: 7, year: 2026 }, 2026) > quality({ rating: 7, year: 2010 }, 2026), "recent bonus");
+  });
+
+  test("recommend: jitter reshuffles close calls but the random seed makes it repeatable", () => {
+    const seeds = { pos: [{ t: { key: "s", title: "S" }, weight: 1, who: ["u1"] }], neg: [] };
+    const list = Array.from({ length: 12 }, (_, i) => rec(i + 1, { rating: 8 }));
+    const order = (n) => recommend(seeds, () => list, { rand: seededRandom(n) }).map((r) => r.t.title).join();
+    assert.equal(order(5), order(5));
+    assert.ok(new Set([1, 2, 3, 4, 5, 6].map(order)).size > 1, "different days, different order");
   });
 
   test("recommend copes with missing lists", () => {
@@ -295,10 +352,11 @@ describe("For you two", () => {
 
   test("becauseText", () => {
     const nameOf = (u) => ({ u1: "amey", u2: "wife" }[u]);
-    const both = { title: "Panchayat", who: ["u1", "u2"] }, wife = { title: "Kota Factory", who: ["u2"] }, wife2 = { title: "Dark", who: ["u2"] };
+    const both = { kind: "title", title: "Panchayat", who: ["u1", "u2"] }, wife = { kind: "title", title: "Kota Factory", who: ["u2"] }, wife2 = { kind: "title", title: "Dark", who: ["u2"] };
     assert.equal(becauseText([both, wife], "u1", nameOf, 2), "✨ Because you both liked Panchayat");
     assert.equal(becauseText([wife, wife2], "u1", nameOf, 2), "✨ Because wife liked Kota Factory & Dark");
     assert.equal(becauseText([wife], "u2", nameOf, 2), "✨ Because you liked Kota Factory");
+    assert.equal(becauseText([{ kind: "cast", title: "Neena Gupta", who: ["u1"] }], "u1", nameOf, 2), "✨ With Neena Gupta");
     assert.equal(becauseText([], "u1", nameOf, 2), "");
   });
 });

@@ -19,3 +19,7 @@ export const TMDB_REGION = "";
 // Optional free OMDb key from https://www.omdbapi.com/apikey.aspx for IMDb ratings on cards.
 // Without it, cards show TMDB's own rating instead.
 export const OMDB_KEY = "a035fa08";
+
+// Only suggest titles originally in these languages (ISO 639-1). Empty = any language.
+// Search and a cast member's own work are never filtered.
+export const LANGUAGES = ["en", "hi"];

@@ -91,8 +91,10 @@ describe("deck", () => {
     assert.ok(tmdbCalls[0].startsWith("trending/all/week") && tmdbCalls[0].includes("api_key=fake-tmdb-key"), tmdbCalls[0]);
     assert.ok(tmdbCalls.some((c) => c.startsWith("discover/movie") && c.includes("primary_release_date.gte=2024-10-21")), "recent movies asked for");
     assert.ok(!tmdbCalls.some((c) => c.includes("top_rated")), "all-time lists wait until recent ones run out");
+    assert.ok(tmdbCalls.some((c) => c.startsWith("discover/movie") && c.includes("with_original_language=en%7Chi")), "only English and Hindi");
     for (let i = 0; i < 8; i++) {
       assert.notEqual(await topTitle(page), "Stranger secret film");
+      assert.doesNotMatch(await topTitle(page), /^Anime/, "Japanese titles are filtered out");
       await page.click("[data-swipe=no]");
       await settle(page);
     }
@@ -259,13 +261,23 @@ describe("for you two", () => {
     return withApp(seed, async ({ page, db, tmdbCalls }) => {
       await page.waitForFunction(() => document.querySelector("#deck .mcard.top h2")?.textContent === "Interstellar");
       assert.equal(await page.textContent("#deck .mcard.top .note"), "✨ Because you both liked Inception");
-      assert.ok(tmdbCalls.some((c) => c.startsWith("movie/27205/recommendations")));
+      assert.ok(tmdbCalls.some((c) => c.startsWith("movie/27205?") && c.includes("recommendations")), "one request gets recs + cast");
+      assert.ok(tmdbCalls.some((c) => c.startsWith("person/900/combined_credits")), "top-billed actor's work is looked up");
       await tab(page, "matches");
-      assert.deepEqual(await texts(page, "#for-you .t"), ["Interstellar", "Tenet"]);
+      const list = await texts(page, "#for-you .t");
+      assert.equal(list[0], "Interstellar", "strongest rec from a title you both liked");
+      assert.ok(list.includes("Tenet"));
+      assert.ok(!list.includes("Badly Rated"), "under 5.5 is dropped");
+      assert.ok(!list.includes("Some Anime"), "only English and Hindi");
+      assert.ok(list.includes("Recent Show"), "an actor's other work comes in");
+      assert.match((await texts(page, "#for-you li:has-text('Recent Show')"))[0], /✨ With Actor 205-0, from Inception/);
       await page.click("#for-you li:has-text('Tenet') [data-pick=yes]");
       await settle(page);
       assert.equal(await mySwipe(db, "Tenet"), "yes");
-      assert.deepEqual(await texts(page, "#for-you .t"), ["Interstellar"], "swiped ones leave the list");
+      assert.ok(!(await texts(page, "#for-you .t")).includes("Tenet"), "swiped ones leave the list");
+      await page.click("#shuffle");
+      await settle(page);
+      assert.ok((await texts(page, "#for-you .t")).length > 0, "shuffle keeps a list");
     });
   });
 
