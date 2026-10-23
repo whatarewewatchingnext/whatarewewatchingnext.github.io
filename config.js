@@ -18,4 +18,4 @@ export const TMDB_REGION = "";
 
 // Optional free OMDb key from https://www.omdbapi.com/apikey.aspx for IMDb ratings on cards.
 // Without it, cards show TMDB's own rating instead.
-export const OMDB_KEY = "";
+export const OMDB_KEY = "a035fa08";
