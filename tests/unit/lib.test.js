@@ -4,6 +4,7 @@ import {
   CHOICES, SWIPE_THRESHOLD, esc, cleanName, mediaLabel, choiceFromDrag, dragProgress, titleKey, fromTmdb, posterUrl,
   recSeeds, recommend, becauseText, favouriteActors, quality, seededRandom, daySeed, keyedNoise, RECENT_SEEDS, SAMPLE_SEEDS,
   detailsFromTmdb, runtimeText, imdbRating, latestWork, faceUrl, CAST_LIMIT,
+  similarity, searchVariants, rankSearch, CLOSE_ENOUGH,
   inLanguages, FEEDS, RECENT_PAGES, CLASSIC_PAGES, feedRequest, yearsAgo, feedMediaType, buildDeck, choicesFor, matches, onlyWants, watchedList, myList, isMatch, partnerNote, STARTER, hue,
 } from "../../lib.js";
 
@@ -89,6 +90,32 @@ describe("titleKey / fromTmdb / posterUrl", () => {
     assert.equal(feedMediaType("discover/tv"), "tv");
     for (const f of [...FEEDS.movie.recent, ...FEEDS.movie.classic]) assert.equal(feedMediaType(f), "movie", f);
     for (const f of [...FEEDS.tv.recent, ...FEEDS.tv.classic]) assert.equal(feedMediaType(f), "tv", f);
+  });
+});
+
+describe("fuzzy search", () => {
+  const t = (title, key = title) => ({ key, title });
+  test("similarity: exact, prefix, typos, unrelated", () => {
+    assert.equal(similarity("Panchayat", "panchayat"), 1);
+    assert.ok(similarity("the office", "The Office: An American Workplace") >= 0.9);
+    assert.ok(similarity("panchyat", "Panchayat") > 0.85);
+    assert.ok(similarity("the ofice", "The Office") > similarity("the ofice", "The Officers' Ward"));
+    assert.ok(similarity("panchyat", "Breaking Bad") < CLOSE_ENOUGH);
+    assert.equal(similarity("", "x"), 0);
+    assert.equal(similarity("Amélie", "amelie"), 1, "accents ignored");
+  });
+  test("variants: shortened words, then each word alone", () => {
+    assert.deepEqual(searchVariants("panchyat"), ["panchy", "panc"]);
+    assert.deepEqual(searchVariants("kota factry"), ["kota fact", "kota fac", "kota", "fact"]);
+    assert.ok(searchVariants("brekaing bad").includes("bad"));
+    assert.deepEqual(searchVariants("up"), [], "nothing shorter to try");
+    assert.deepEqual(searchVariants("  "), []);
+  });
+  test("rank: closest first, far-off variant results dropped, original results kept", () => {
+    const out = rankSearch("panchyat", [t("Some Exact Hit From TMDB")], [t("Panch Ratan"), t("Panchayat"), t("Zebra"), t("Panchayat")]);
+    assert.deepEqual(out.map((x) => x.title), ["Panchayat", "Panch Ratan", "Some Exact Hit From TMDB"].filter((n) => n !== "Panch Ratan" || similarity("panchyat", n) >= CLOSE_ENOUGH));
+    assert.ok(!out.some((x) => x.title === "Zebra"));
+    assert.equal(out.filter((x) => x.title === "Panchayat").length, 1, "no duplicates");
   });
 });
 

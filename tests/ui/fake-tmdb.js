@@ -15,6 +15,16 @@ export function tmdbResponse(url) {
       { id: 5, media_type: "person", name: "Some Actor" },
     ] };
   }
+  if (path === "search/tv" || path === "search/movie") {
+    const q = (url.searchParams.get("query") ?? "").toLowerCase().split(/\s+/).filter(Boolean);
+    const catalog = [
+      { id: 101352, media_type: "tv", name: "Panchayat", first_air_date: "2020-04-03", vote_average: 8.9, vote_count: 300 },
+      { id: 89113, media_type: "tv", name: "Kota Factory", first_air_date: "2019-04-16", vote_average: 8.7, vote_count: 200 },
+      { id: 157336, media_type: "movie", title: "Interstellar", release_date: "2014-11-05", vote_average: 8.4, vote_count: 30000 },
+      { id: 777, media_type: "movie", title: "Panch Ratan", release_date: "1965-01-01", vote_average: 6, vote_count: 30 },
+    ].filter((x) => x.media_type === path.slice(7));
+    return { results: catalog.filter((x) => q.every((w) => (x.title ?? x.name).toLowerCase().split(/\s+/).some((tw) => tw.startsWith(w)))).map(({ media_type, ...r }) => r) };
+  }
   const det = path.match(/^(movie|tv)\/(\d+)$/);
   if (det) return { ...details(det[1], Number(det[2])), recommendations: { results: recommendationsFor(Number(det[2])) } };
   const person = path.match(/^person\/(\d+)\/combined_credits$/);

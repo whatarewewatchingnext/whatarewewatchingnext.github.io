@@ -232,6 +232,69 @@ export function partnerNote(swipes, titleId, userId, nameOf) {
   return notes.join(" · ");
 }
 
+// -------------------------------------------------------------- search ----
+//
+// TMDB search has no typo tolerance ("panchyat" finds nothing) but matches the start of
+// words ("panch" finds Panchayat). So when a search finds nothing close, we also search
+// shortened forms of the words, then rank everything by how close the title is to what
+// was typed.
+
+const fold = (s) => String(s ?? "").toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9\u0900-\u097f]+/g, " ").trim();
+
+function editDistance(a, b) {
+  const row = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    let prev = row[0];
+    row[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const tmp = row[j];
+      row[j] = Math.min(row[j] + 1, row[j - 1] + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1));
+      prev = tmp;
+    }
+  }
+  return row[b.length];
+}
+
+// 0..1: how close a title is to the query. Comparing against the title's start too means
+// "the ofice" scores high against "The Office: An American Workplace".
+export function similarity(query, title) {
+  const q = fold(query), t = fold(title);
+  if (!q || !t) return 0;
+  if (t === q) return 1;
+  if (t.startsWith(q)) return 0.95;
+  const whole = 1 - editDistance(q, t) / Math.max(q.length, t.length);
+  const head = t.slice(0, q.length + 1);
+  const start = 1 - editDistance(q, head) / Math.max(q.length, head.length);
+  return Math.max(whole, start * 0.92);
+}
+
+// Extra searches to try when the original finds nothing close: the words shortened
+// (typos are rarely in the first letters), and each word on its own (for a typo in one word).
+export function searchVariants(query) {
+  const words = fold(query).split(" ").filter(Boolean);
+  if (!words.length) return [];
+  const cut = (w, f) => (w.length <= 4 ? w : w.slice(0, Math.max(3, Math.floor(w.length * f))));
+  const out = [
+    words.map((w) => cut(w, 0.75)).join(" "),
+    words.map((w) => cut(w, 0.5)).join(" "),
+    ...(words.length > 1 ? words.map((w) => cut(w, 0.75)) : []),
+  ];
+  return [...new Set(out)].filter((v) => v && v !== words.join(" ")).slice(0, 4);
+}
+
+// Merged results: closest first; titles found only through a variant must be reasonably close.
+export const CLOSE_ENOUGH = 0.6;
+// A result this close means the search worked as typed, so no extra searches are needed.
+export const GOOD_MATCH = 0.9;
+export function rankSearch(query, original, extra = []) {
+  const seen = new Set();
+  const all = [...original.map((t, i) => ({ t, i, sim: similarity(query, t.title), orig: true })),
+               ...extra.map((t, i) => ({ t, i: i + 1000, sim: similarity(query, t.title), orig: false }))]
+    .filter(({ t }) => !seen.has(t.key) && seen.add(t.key))
+    .filter((x) => x.orig || x.sim >= CLOSE_ENOUGH);
+  return all.sort((a, b) => b.sim - a.sim || a.i - b.i).map((x) => x.t);
+}
+
 // ------------------------------------------------- "For you two" recs ----
 //
 // Every title one of you liked is a seed. Candidates come from two places:

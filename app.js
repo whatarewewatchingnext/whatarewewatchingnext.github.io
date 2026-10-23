@@ -3,7 +3,7 @@ import { SUPABASE_URL, SUPABASE_KEY, USERNAME_EMAIL_DOMAIN, TMDB_KEY, TMDB_REGIO
 import {
   CHOICES, esc, cleanName, mediaLabel, choiceFromDrag, dragProgress, titleKey, fromTmdb, posterUrl, faceUrl,
   detailsFromTmdb, imdbRating, latestWork, recSeeds, recommend, becauseText, inLanguages,
-  favouriteActors, seededRandom, daySeed, keyedNoise,
+  favouriteActors, seededRandom, daySeed, keyedNoise, searchVariants, rankSearch, similarity, GOOD_MATCH,
   feedRequest, feedMediaType, buildDeck, choicesFor, matches, onlyWants, watchedList, myList,
   partnerNote, STARTER, hue,
 } from "./lib.js";
@@ -695,7 +695,7 @@ function setupSearch() {
     } else {
       $("#results").innerHTML = `<li class="muted">Searching…</li>`;
       try {
-        found = (await tmdb("search/multi", { query: q, include_adult: "false" })).map((r) => fromTmdb(r)).filter(Boolean).slice(0, 12);
+        found = await fuzzySearch(q);
       } catch (err) {
         $("#results").innerHTML = `<li class="error">Search failed: ${esc(err.message)}</li>`;
         return;
@@ -708,6 +708,17 @@ function setupSearch() {
 }
 
 const renderResults = (found) => renderPickList($("#results"), found);
+
+// Search as typed; if nothing comes back close, also search shortened words (TV and movies
+// separately, which surfaces popular titles better) and rank everything by closeness.
+async function fuzzySearch(q) {
+  const get = async (path, query, mediaType) =>
+    (await tmdb(path, { query, include_adult: "false" })).map((r) => fromTmdb(r, mediaType ?? r.media_type)).filter(Boolean);
+  const original = await get("search/multi", q);
+  if (original.some((t) => similarity(q, t.title) >= GOOD_MATCH)) return rankSearch(q, original).slice(0, 12);
+  const extra = (await Promise.all(searchVariants(q).flatMap((v) => [get("search/tv", v, "tv"), get("search/movie", v, "movie")]).map((p) => p.catch(() => [])))).flat();
+  return rankSearch(q, original, extra).slice(0, 12);
+}
 
 // A list of titles (search results, someone's latest work) with buttons to swipe each one.
 function renderPickList(el, found, subs = []) {

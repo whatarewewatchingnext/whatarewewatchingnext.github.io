@@ -454,7 +454,7 @@ describe("search", () => {
     await page.fill("#search-form [name=q]", "Bad");
     await page.press("#search-form [name=q]", "Enter");
     await page.waitForSelector("#results li .t");
-    assert.deepEqual(await texts(page, "#results .t"), ["Inception", "Breaking Bad"], "people are left out");
+    assert.deepEqual(await texts(page, "#results .t"), ["Breaking Bad", "Inception"], "closest first; people are left out");
     await page.click("#results li:has-text('Breaking Bad') [data-pick=yes]");
     await settle(page);
     assert.equal(await mySwipe(db, "Breaking Bad"), "yes");
@@ -464,6 +464,19 @@ describe("search", () => {
     await page.click("#close-search");
     await tab(page, "mine");
     assert.ok((await texts(page, "#mine .t")).includes("Breaking Bad"));
+  }));
+});
+
+describe("fuzzy search", () => {
+  test("typos still find the title, closest first", () => withApp(baseSeed(), async ({ page, tmdbCalls }) => {
+    await page.click("#open-search");
+    for (const [typed, want] of [["panchyat", "Panchayat"], ["kota factry", "Kota Factory"], ["intersteller", "Interstellar"]]) {
+      await page.fill("#search-form [name=q]", typed);
+      await page.press("#search-form [name=q]", "Enter");
+      await page.waitForFunction((w) => document.querySelector("#results li .t")?.textContent === w, want);
+    }
+    assert.ok(tmdbCalls.some((c) => c.startsWith("search/tv") && c.includes("query=panc")));
+    assert.ok(!(await texts(page, "#results .t")).includes("Panch Ratan"), "far-off matches are dropped");
   }));
 });
 
