@@ -1,8 +1,8 @@
 // Public Supabase settings. The publishable key is designed to be public:
 // row-level security in supabase/schema.sql is what keeps your data private.
 // Never put a secret (sb_secret_...) or service_role key here.
-export const SUPABASE_URL = "";
-export const SUPABASE_KEY = "";
+export const SUPABASE_URL = "https://fivsbxpltavzjsjqmors.supabase.co";
+export const SUPABASE_KEY = "sb_publishable__JClSNNj6h31sW-yngXpqA_8o4iMDRT";
 
 // Usernames are turned into this pseudo-email for Supabase Auth.
 // No mail is ever sent (email confirmation is turned off).
