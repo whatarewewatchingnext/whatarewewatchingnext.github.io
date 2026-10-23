@@ -78,7 +78,8 @@ export async function openApp(seed = baseSeed(), { width = 375, height = 812, tm
     tmdbCalls.push(url.pathname.replace("/3/", "") + url.search);
     route.fulfill({ contentType: "application/json", body: JSON.stringify(tmdbResponse(url)) });
   });
-  await page.route(/image\.tmdb\.org\/t\/p\//, (route) => route.fulfill({ contentType: "image/svg+xml",
+  // Posters load as a plain rectangle, except paths containing "broken", which 404.
+  await page.route(/image\.tmdb\.org\/t\/p\//, (route) => /broken/.test(route.request().url()) ? route.fulfill({ status: 404 }) : route.fulfill({ contentType: "image/svg+xml",
     body: `<svg xmlns="http://www.w3.org/2000/svg" width="500" height="750"><rect width="500" height="750" fill="#345"/></svg>` }));
   await page.route(/\/config\.js$/, async (route) => {
     const body = (await readFile(join(ROOT, "config.js"), "utf8"))

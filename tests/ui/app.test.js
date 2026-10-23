@@ -130,11 +130,14 @@ describe("deck", () => {
     await page.mouse.up();
   }));
 
-  test("a poster that fails to load falls back to the gradient", () => withApp(baseSeed(), async ({ page }) => {
-    await page.route(/image\.tmdb\.org/, (route) => route.abort());
-    await page.click("[data-swipe=no]");
-    await page.waitForFunction(() => !document.querySelector("#deck .mcard.top img"));
-  }));
+  test("a poster that fails to load falls back to the gradient", () => {
+    const seed = baseSeed();
+    seed.titles[0].poster = "/broken.jpg";
+    return withApp(seed, async ({ page }) => {
+      assert.equal(await topTitle(page), "Inception");
+      await page.waitForFunction(() => !document.querySelector("#deck .mcard.top img"));
+    });
+  });
 
   test("tapping a card shows the full description", () => withApp(baseSeed(), async ({ page }) => {
     await page.click("#deck .mcard.top");
