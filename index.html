@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f7f4f1" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#16131a" media="(prefers-color-scheme: dark)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Watching Next">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <title>What Are We Watching Next</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍿</text></svg>">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>🍿 What are we watching next?</h1>
+    <div id="who" hidden><span id="who-name"></span> <button id="logout" class="link">Log out</button></div>
+  </header>
+
+  <main id="app">
+    <p class="muted">Loading…</p>
+  </main>
+
+  <div id="toast" role="status" aria-live="polite" hidden></div>
+
+  <template id="tpl-setup">
+    <section class="card">
+      <h2>Almost there</h2>
+      <p>The app isn't connected to a database yet. Fill in <code>config.js</code> with your Supabase project URL and publishable key — see the README.</p>
+    </section>
+  </template>
+
+  <template id="tpl-auth">
+    <section class="card narrow">
+      <div class="tabs">
+        <button data-mode="login" class="active">Log in</button>
+        <button data-mode="signup">Sign up</button>
+      </div>
+      <form id="auth-form">
+        <label>Username <input name="username" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" required pattern="[a-zA-Z0-9_.\-]{3,30}" title="3–30 letters, numbers, . _ -"></label>
+        <label>Password <input name="password" type="password" autocomplete="current-password" required minlength="6"></label>
+        <button type="submit" class="primary">Log in</button>
+        <p class="error" hidden></p>
+      </form>
+    </section>
+  </template>
+
+  <template id="tpl-household">
+    <section class="card narrow">
+      <h2>Set up your couch</h2>
+      <form id="create-form">
+        <p>First one here? Create a household.</p>
+        <label>Household name <input name="name" placeholder="Our couch"></label>
+        <button class="primary">Create</button>
+      </form>
+      <hr>
+      <form id="join-form">
+        <p>Partner already set it up? Enter their join code.</p>
+        <label>Join code <input name="code" required placeholder="A1B2C3D4" autocapitalize="characters" autocomplete="off"></label>
+        <button>Join</button>
+      </form>
+      <p class="error" hidden></p>
+    </section>
+  </template>
+
+  <template id="tpl-main">
+    <nav class="bottom-nav">
+      <button data-view="swipe" class="active"><span>🃏</span>Swipe</button>
+      <button data-view="matches"><span>💕</span>Matches<b id="match-count" class="badge" hidden></b></button>
+      <button data-view="watched"><span>🎬</span>Watched</button>
+      <button data-view="mine"><span>📋</span>My lists</button>
+      <button data-view="home"><span>🏠</span>Home</button>
+    </nav>
+
+    <div data-view="swipe" class="swipe-view">
+      <div class="deck-bar">
+        <div class="seg" id="filter" role="group" aria-label="Show">
+          <button data-filter="all" class="active">All</button>
+          <button data-filter="movie">Movies</button>
+          <button data-filter="tv">Shows</button>
+        </div>
+        <button id="open-search" aria-label="Find a title">🔍 Find</button>
+      </div>
+      <div id="deck" class="deck" aria-live="polite"></div>
+      <div class="actions">
+        <button data-swipe="no" class="act no" aria-label="Not interested (swipe left)">✕</button>
+        <button data-swipe="disliked" class="act disliked" aria-label="Watched, didn't like (swipe down)">👎</button>
+        <button id="undo" class="act undo" aria-label="Undo last swipe" disabled>↶</button>
+        <button data-swipe="liked" class="act liked" aria-label="Watched and liked (swipe up)">👍</button>
+        <button data-swipe="yes" class="act yes" aria-label="Interested (swipe right)">♥</button>
+      </div>
+      <p class="hint">← nope · → want to watch · ↑ seen it 👍 · ↓ seen it 👎</p>
+    </div>
+
+    <div data-view="matches" hidden>
+      <section class="card">
+        <div class="card-head">
+          <h2>💕 You both want to watch</h2>
+          <button id="pick" class="primary" hidden>🎲 Pick one</button>
+        </div>
+        <div id="picked" hidden></div>
+        <ul id="matches" class="list"></ul>
+      </section>
+      <section class="card" id="partner-card">
+        <h2 id="partner-title"></h2>
+        <p class="muted small">Tap ♥ if you're in too.</p>
+        <ul id="partner-wants" class="list"></ul>
+      </section>
+      <section class="card">
+        <h2>🙋 Only you want</h2>
+        <ul id="only-me" class="list"></ul>
+      </section>
+    </div>
+
+    <section data-view="watched" class="card" hidden>
+      <h2>🎬 Watched</h2>
+      <ul id="watched" class="list"></ul>
+    </section>
+
+    <section data-view="mine" class="card" hidden>
+      <div class="seg wide" id="mine-tabs" role="group" aria-label="My list">
+        <button data-choice="yes" class="active">♥ Want</button>
+        <button data-choice="liked">👍 Liked</button>
+        <button data-choice="disliked">👎 Didn't</button>
+        <button data-choice="no">✕ Nope</button>
+      </div>
+      <ul id="mine" class="list"></ul>
+      <p class="muted small center">Tap another icon to change your mind · ↺ puts it back in your deck</p>
+    </section>
+
+    <section data-view="home" class="card" hidden>
+      <h2 id="hh-name"></h2>
+      <p>Join code for your partner: <code id="hh-code"></code></p>
+      <h3>Members</h3>
+      <ul id="members" class="list compact"></ul>
+      <p class="muted small" id="tmdb-credit" hidden>Movie data and posters from <a href="https://www.themoviedb.org" target="_blank" rel="noopener">TMDB</a>. This product uses the TMDB API but is not endorsed or certified by TMDB.</p>
+    </section>
+
+    <dialog id="search">
+      <form id="search-form" class="row">
+        <input name="q" placeholder="Search movies & shows…" required autocomplete="off" enterkeyhint="search">
+        <select name="media" class="kind" aria-label="Movie or show" hidden>
+          <option value="movie">🎬 Movie</option>
+          <option value="tv">📺 Show</option>
+        </select>
+        <button class="primary">Go</button>
+      </form>
+      <ul id="results" class="list"></ul>
+      <div class="row end"><button id="close-search">Done</button></div>
+    </dialog>
+  </template>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
