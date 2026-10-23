@@ -162,6 +162,12 @@ export function createClient() {
         return { data: session(), error: null };
       },
       async signOut() { sessionUserId = null; emit("SIGNED_OUT"); return { error: null }; },
+      async updateUser({ password }) {
+        if (!me()) return { data: {}, error: { message: "Auth session missing!" } };
+        if (password.length < 6) return { data: {}, error: { message: "Password should be at least 6 characters." } };
+        me().password = password;
+        return { data: { user: session().user }, error: null };
+      },
     },
     from: query,
     rpc,

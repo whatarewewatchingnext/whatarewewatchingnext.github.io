@@ -121,6 +121,8 @@ button:disabled { opacity: .45; cursor: default; }
 }
 
 .error { color: var(--bad); font-size: .9rem; }
+.ok { color: var(--liked); font-size: .9rem; }
+#password-form .primary { width: 100%; }
 .muted { color: var(--muted); }
 .small { font-size: .85rem; }
 .center { text-align: center; }

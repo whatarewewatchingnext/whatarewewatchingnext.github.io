@@ -143,6 +143,18 @@
       <p>Join code for your partner: <code id="hh-code"></code></p>
       <h3>Members</h3>
       <ul id="members" class="list compact"></ul>
+      <hr>
+      <h3>Change password</h3>
+      <form id="password-form">
+        <input name="username" autocomplete="username" hidden>
+        <label>Current password <input name="current" type="password" autocomplete="current-password" required></label>
+        <label>New password <input name="password" type="password" autocomplete="new-password" required minlength="6"></label>
+        <label>New password again <input name="confirm" type="password" autocomplete="new-password" required minlength="6"></label>
+        <button class="primary">Change password</button>
+        <p class="error" hidden></p>
+        <p class="ok" role="status" hidden>Password changed. Use the new one next time you log in.</p>
+      </form>
+      <hr>
       <p class="muted small" id="tmdb-credit" hidden>Movie data and posters from <a href="https://www.themoviedb.org" target="_blank" rel="noopener">TMDB</a>. This product uses the TMDB API but is not endorsed or certified by TMDB.</p>
     </section>
 

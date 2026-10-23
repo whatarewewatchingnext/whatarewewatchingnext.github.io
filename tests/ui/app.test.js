@@ -83,6 +83,46 @@ describe("auth", () => {
   }));
 });
 
+describe("change password", () => {
+  const fill = async (page, current, password, confirm = password) => {
+    await page.fill("#password-form [name=current]", current);
+    await page.fill("#password-form [name=password]", password);
+    await page.fill("#password-form [name=confirm]", confirm);
+    await page.click("#password-form button");
+  };
+
+  test("wrong current password, mismatch and same-as-old are refused; nothing changes", () => withApp(baseSeed(), async ({ page, db }) => {
+    await tab(page, "home");
+    await fill(page, "nope123", "newpass1");
+    await page.waitForSelector("#password-form .error:not([hidden])");
+    assert.equal(await page.textContent("#password-form .error"), "Current password is wrong.");
+    await fill(page, "secret1", "newpass1", "newpass2");
+    assert.equal(await page.textContent("#password-form .error"), "The new passwords don't match.");
+    await fill(page, "secret1", "secret1");
+    assert.equal(await page.textContent("#password-form .error"), "The new password is the same as the current one.");
+    await page.fill("#password-form [name=password]", "abc");
+    assert.equal(await page.$eval("#password-form [name=password]", (i) => i.checkValidity()), false, "6 characters minimum");
+    assert.equal((await db()).users.find((u) => u.id === "u1").password, "secret1");
+    assert.equal(await page.isVisible(".bottom-nav"), true, "still logged in");
+  }));
+
+  test("changes it; the old one stops working and the new one logs in", () => withApp(baseSeed(), async ({ page, db }) => {
+    await tab(page, "home");
+    await fill(page, "secret1", "brandnew9");
+    await page.waitForSelector("#password-form .ok:not([hidden])");
+    assert.equal(await page.inputValue("#password-form [name=current]"), "", "form is cleared");
+    assert.equal((await db()).users.find((u) => u.id === "u1").password, "brandnew9");
+    await page.click("#logout");
+    await page.fill("#auth-form [name=username]", "amey");
+    await page.fill("#auth-form [name=password]", "secret1");
+    await page.click("#auth-form button[type=submit]");
+    await page.waitForSelector("#auth-form .error:not([hidden])");
+    await page.fill("#auth-form [name=password]", "brandnew9");
+    await page.click("#auth-form button[type=submit]");
+    await page.waitForSelector(".bottom-nav");
+  }));
+});
+
 describe("deck", () => {
   test("household titles first, then the TMDB feed; never another household's titles", () => withApp(baseSeed(), async ({ page, tmdbCalls }) => {
     assert.equal(await topTitle(page), "Inception");

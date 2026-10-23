@@ -144,6 +144,7 @@ function showMain() {
   setupDrag($("#deck"));
   setupSearch();
   setupPerson();
+  setupPassword();
   $("#tmdb-credit").hidden = !TMDB_KEY;
   showView("swipe");
 
@@ -730,6 +731,36 @@ function bindPickList(el) {
     if (error) return toast(error.message);
     await loadData();
     renderPickList(el, el.found, el.subs);
+  });
+}
+
+// ------------------------------------------------------------ password ----
+
+// Checks the current password first (so an unlocked phone isn't enough), then sets the new one.
+function setupPassword() {
+  const form = $("#password-form");
+  const err = $(".error", form), ok = $(".ok", form), submit = $("button", form);
+  form.username.value = state.member?.username ?? "";
+  form.addEventListener("input", () => { err.hidden = true; ok.hidden = true; });
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    err.hidden = true;
+    ok.hidden = true;
+    const { current, password, confirm } = form;
+    if (password.value !== confirm.value) return showError(err, new Error("The new passwords don't match."));
+    if (password.value === current.value) return showError(err, new Error("The new password is the same as the current one."));
+    submit.disabled = true;
+    try {
+      const check = await sb.auth.signInWithPassword({ email: state.user.email, password: current.value });
+      if (check.error) return showError(err, new Error("Current password is wrong."));
+      const { error } = await sb.auth.updateUser({ password: password.value });
+      if (error) return showError(err, error);
+      form.reset();
+      form.username.value = state.member?.username ?? "";
+      ok.hidden = false;
+    } finally {
+      submit.disabled = false;
+    }
   });
 }
 
