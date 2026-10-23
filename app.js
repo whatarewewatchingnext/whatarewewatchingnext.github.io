@@ -2,7 +2,7 @@ import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 import { SUPABASE_URL, SUPABASE_KEY, USERNAME_EMAIL_DOMAIN, TMDB_KEY, TMDB_REGION, OMDB_KEY } from "./config.js";
 import {
   CHOICES, esc, cleanName, mediaLabel, choiceFromDrag, dragProgress, titleKey, fromTmdb, posterUrl, faceUrl,
-  detailsFromTmdb, imdbRating, latestWork,
+  detailsFromTmdb, imdbRating, latestWork, recSeeds, recommend, becauseText,
   feedRequest, feedMediaType, buildDeck, choicesFor, matches, onlyWants, watchedList, myList,
   partnerNote, STARTER, hue,
 } from "./lib.js";
@@ -198,6 +198,49 @@ async function loadData() {
   state.swipes = swipes ?? [];
   noticeMatches();
   renderAll();
+  refreshRecs();
+}
+
+// ------------------------------------------------- "For you two" recs ----
+
+// TMDB recommendations per seed title key, fetched once per session.
+const recLists = new Map();
+let recs = [];                 // [{ t, score, because }], best first
+let recReason = new Map();     // title key → "✨ Because …"
+
+async function refreshRecs() {
+  if (!TMDB_KEY || !state.user) return;
+  const seeds = recSeeds(state.titles, state.swipes, memberIds());
+  const missing = [...seeds.pos, ...seeds.neg].filter((s) => !recLists.has(s.t.key));
+  await Promise.all(missing.map(async ({ t }) => {
+    recLists.set(t.key, []);
+    try {
+      recLists.set(t.key, (await tmdb(`${t.media_type}/${t.tmdb_id}/recommendations`, { page: 1 }))
+        .map((r) => fromTmdb(r, r.media_type ?? t.media_type)).filter(Boolean));
+    } catch (e) {
+      console.warn("TMDB recommendations:", e.message);
+      recLists.delete(t.key);
+    }
+  }));
+  const mine = new Set(state.swipes.filter((x) => x.user_id === state.user.id).map((x) => x.title_id));
+  const exclude = new Set(state.titles.filter((t) => mine.has(t.id)).map((t) => t.key));
+  recs = recommend(seeds, (k) => recLists.get(k), { exclude });
+  recReason = new Map(recs.map((r) => [r.t.key, becauseText(r.because, state.user.id, nameOf, state.members.length)]));
+  rendered = "";
+  renderDeck();
+  renderForYou();
+}
+
+function renderForYou() {
+  const el = $("#for-you");
+  if (!el) return;
+  $("#for-you-card").hidden = !TMDB_KEY;
+  const top = recs.slice(0, 10);
+  if (!top.length) {
+    el.innerHTML = `<li class="muted">Swipe → or ↑ on a few things you like and suggestions show up here.</li>`;
+    return;
+  }
+  renderPickList(el, top.map((r) => r.t), top.map((r) => esc(recReason.get(r.t.key))));
 }
 
 // Toast when a new match appears, whether from my swipe or my partner's.
@@ -286,7 +329,9 @@ function ensureDetails(t) {
 }
 
 function currentDeck(filter = state.filter) {
-  const deck = buildDeck({ titles: state.titles, swipes: state.swipes, feed: feedFor(filter).items, userId: state.user.id, filter })
+  // Recommendations go after anything from the household, before the general feed.
+  const feed = [...recs.map((r) => r.t), ...feedFor(filter).items];
+  const deck = buildDeck({ titles: state.titles, swipes: state.swipes, feed, userId: state.user.id, filter })
     .filter((t) => !state.pending.has(t.key));
   if (state.front) {
     const i = deck.findIndex((t) => t.key === state.front);
@@ -328,7 +373,7 @@ const partnerNoteFor = (t) => (t.id ? partnerNote(state.swipes, t.id, state.user
 function cardHtml(t, i) {
   const d = details.get(t.key);
   const poster = posterUrl(d?.poster ?? t.poster);
-  const note = partnerNoteFor(t);
+  const note = partnerNoteFor(t) || recReason.get(t.key) || "";
   const overview = d?.overview ?? t.overview;
   const rating = d?.imdb ? `<span class="badge-imdb"><b>IMDb</b> ★ ${esc(d.imdb)}</span>`
     : t.rating ? `<span class="badge-tmdb"><b>TMDB</b> ★ ${esc(t.rating)}</span>` : "";
@@ -637,6 +682,7 @@ function setupPerson() {
   $("#close-person").addEventListener("click", () => dlg.close());
   dlg.addEventListener("close", () => renderDeck());
   bindPickList($("#credits"));
+  bindPickList($("#for-you"));
 }
 
 async function openPerson({ person, name, face }) {

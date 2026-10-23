@@ -2,6 +2,7 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import {
   CHOICES, SWIPE_THRESHOLD, esc, cleanName, mediaLabel, choiceFromDrag, dragProgress, titleKey, fromTmdb, posterUrl,
+  recSeeds, recommend, becauseText, SEED_LIMIT,
   detailsFromTmdb, runtimeText, imdbRating, latestWork, faceUrl, CAST_LIMIT,
   FEEDS, RECENT_PAGES, CLASSIC_PAGES, feedRequest, yearsAgo, feedMediaType, buildDeck, choicesFor, matches, onlyWants, watchedList, myList, isMatch, partnerNote, STARTER, hue,
 } from "../../lib.js";
@@ -235,6 +236,70 @@ describe("details", () => {
     assert.equal(w[0].character, null);
     assert.equal(latestWork({ cast: [] }).length, 0);
     assert.equal(latestWork({}).length, 0);
+  });
+});
+
+describe("For you two", () => {
+  const tm = (id, name, extra = {}) => title(id, name, { tmdb_id: Number(id.replace(/\D/g, "")) || 1, ...extra });
+  const rec = (n, extra = {}) => ({ key: `movie:${n}`, media_type: "movie", title: `Rec ${n}`, ...extra });
+
+  test("seeds: likes are positive, both liking counts extra, no/disliked are negative", () => {
+    const titles = [tm("s1", "Both liked"), tm("s2", "One wants"), tm("s3", "Nope"), tm("s4", "Mixed"), title("c", "Custom")];
+    const swipes = [
+      sw("s1", "u1", "liked", "2026-10-05"), sw("s1", "u2", "yes", "2026-10-06"),
+      sw("s2", "u2", "yes", "2026-10-07"),
+      sw("s3", "u1", "no"), sw("s3", "u2", "disliked"),
+      sw("s4", "u1", "yes", "2026-10-01"), sw("s4", "u2", "no", "2026-10-01"),
+      sw("c", "u1", "liked"),
+    ];
+    const { pos, neg } = recSeeds(titles, swipes, ["u1", "u2"]);
+    assert.deepEqual(pos.map((p) => p.t.title), ["One wants", "Both liked", "Mixed"], "newest first, hand-added titles skipped");
+    assert.equal(pos[1].weight, (2 + 1.2) * 1.5);
+    assert.equal(pos[0].weight, 1.2);
+    assert.deepEqual(pos[2].who, ["u1"], "a yes beats the other's no");
+    assert.deepEqual(neg.map((n) => n.t.title), ["Nope"]);
+    assert.equal(neg[0].weight, 2.5);
+  });
+
+  test("seeds are capped", () => {
+    const titles = Array.from({ length: SEED_LIMIT + 5 }, (_, i) => tm(`s${i + 1}`, `T${i}`));
+    const swipes = titles.map((t, i) => sw(t.id, "u1", "yes", `2026-10-${String(i + 1).padStart(2, "0")}`));
+    assert.equal(recSeeds(titles, swipes, ["u1", "u2"]).pos.length, SEED_LIMIT);
+  });
+
+  test("recommend: shared recs rise, negatives sink, excluded and unseeded drop out", () => {
+    const seeds = {
+      pos: [{ t: { key: "movie:1", title: "A" }, weight: 3, who: ["u1", "u2"] }, { t: { key: "movie:2", title: "B" }, weight: 1.2, who: ["u2"] }],
+      neg: [{ t: { key: "movie:3", title: "N" }, weight: 2.5, who: ["u1"] }],
+    };
+    const lists = {
+      "movie:1": [rec(10), rec(11), rec(12), rec(99)],
+      "movie:2": [rec(11), rec(13)],
+      "movie:3": [rec(12), rec(14)],
+    };
+    const out = recommend(seeds, (k) => lists[k], { exclude: new Set(["movie:99"]), thisYear: 2026 });
+    assert.deepEqual(out.map((r) => r.t.title), ["Rec 11", "Rec 10", "Rec 13", "Rec 12"], "two seeds beat one; a negative seed sinks Rec 12");
+    assert.deepEqual(out[0].because.map((b) => b.title), ["A", "B"], "strongest reason first");
+    assert.ok(!out.some((r) => r.t.title === "Rec 14"), "only negative seeds → not suggested");
+  });
+
+  test("recommend: rating and recency nudge ties", () => {
+    const seeds = { pos: [{ t: { key: "s", title: "S" }, weight: 1, who: ["u1"] }, { t: { key: "s2", title: "S2" }, weight: 1, who: ["u1"] }], neg: [] };
+    const lists = { s: [rec(1, { year: 2010, rating: 6 })], s2: [rec(2, { year: 2026, rating: 8.5 })] };
+    assert.deepEqual(recommend(seeds, (k) => lists[k], { thisYear: 2026 }).map((r) => r.t.title), ["Rec 2", "Rec 1"]);
+  });
+
+  test("recommend copes with missing lists", () => {
+    assert.deepEqual(recommend({ pos: [{ t: { key: "x", title: "X" }, weight: 1, who: [] }], neg: [] }, () => undefined), []);
+  });
+
+  test("becauseText", () => {
+    const nameOf = (u) => ({ u1: "amey", u2: "wife" }[u]);
+    const both = { title: "Panchayat", who: ["u1", "u2"] }, wife = { title: "Kota Factory", who: ["u2"] }, wife2 = { title: "Dark", who: ["u2"] };
+    assert.equal(becauseText([both, wife], "u1", nameOf, 2), "✨ Because you both liked Panchayat");
+    assert.equal(becauseText([wife, wife2], "u1", nameOf, 2), "✨ Because wife liked Kota Factory & Dark");
+    assert.equal(becauseText([wife], "u2", nameOf, 2), "✨ Because you liked Kota Factory");
+    assert.equal(becauseText([], "u1", nameOf, 2), "");
   });
 });
 

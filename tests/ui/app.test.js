@@ -251,6 +251,30 @@ describe("card details + cast", () => {
   }));
 });
 
+describe("for you two", () => {
+  test("titles similar to what you both liked show in the deck and on Matches, with the reason", () => {
+    const seed = baseSeed();
+    seed.swipes.push({ title_id: "t1", user_id: "u1", household_id: "h1", choice: "liked", updated_at: "2026-10-01" },
+      { title_id: "t1", user_id: "u2", household_id: "h1", choice: "liked", updated_at: "2026-10-02" });
+    return withApp(seed, async ({ page, db, tmdbCalls }) => {
+      await page.waitForFunction(() => document.querySelector("#deck .mcard.top h2")?.textContent === "Interstellar");
+      assert.equal(await page.textContent("#deck .mcard.top .note"), "✨ Because you both liked Inception");
+      assert.ok(tmdbCalls.some((c) => c.startsWith("movie/27205/recommendations")));
+      await tab(page, "matches");
+      assert.deepEqual(await texts(page, "#for-you .t"), ["Interstellar", "Tenet"]);
+      await page.click("#for-you li:has-text('Tenet') [data-pick=yes]");
+      await settle(page);
+      assert.equal(await mySwipe(db, "Tenet"), "yes");
+      assert.deepEqual(await texts(page, "#for-you .t"), ["Interstellar"], "swiped ones leave the list");
+    });
+  });
+
+  test("no TMDB key: no suggestions section", () => withApp(baseSeed(), async ({ page }) => {
+    await tab(page, "matches");
+    assert.equal(await page.isVisible("#for-you-card"), false);
+  }, { tmdb: false }));
+});
+
 describe("matches", () => {
   test("my yes on something my partner wants is a match", () => {
     const seed = baseSeed();

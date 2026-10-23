@@ -226,6 +226,81 @@ export function partnerNote(swipes, titleId, userId, nameOf) {
   return notes.join(" · ");
 }
 
+// ------------------------------------------------- "For you two" recs ----
+//
+// Every title one of you liked is a seed. TMDB's "recommendations" for each seed are
+// candidates; a candidate's score adds up how strongly it was recommended (higher in a
+// seed's list counts more) times how much you liked that seed. Liked-after-watching counts
+// more than "want to watch", and a seed you BOTH like counts extra. Titles recommended by
+// things you said no to, or watched and disliked, lose points.
+
+export const SEED_LIMIT = 15;
+export const NEG_SEED_LIMIT = 8;
+const POSITIVE = { liked: 2, yes: 1.2 };
+const NEGATIVE = { disliked: 1.5, no: 1 };
+const BOTH_BONUS = 1.5;
+const NEG_FACTOR = 0.6;
+const rankWeight = (i) => 1 / (1 + i / 5);
+
+// Seeds from household swipes: { pos, neg }, each [{ t, weight, who }] newest first.
+// Only TMDB titles can be seeds (hand-added ones have no recommendations).
+export function recSeeds(titles, swipes, memberIds) {
+  const pos = [], neg = [];
+  for (const { t, ss } of withSwipes(titles, swipes)) {
+    if (!t.tmdb_id || !ss.length) continue;
+    const mine = ss.filter((s) => memberIds.includes(s.user_id));
+    const likers = mine.filter((s) => POSITIVE[s.choice]);
+    const last = lastSwiped(ss);
+    if (likers.length) {
+      let weight = likers.reduce((n, s) => n + POSITIVE[s.choice], 0);
+      if (memberIds.length >= 2 && likers.length === memberIds.length) weight *= BOTH_BONUS;
+      pos.push({ t, weight, who: likers.map((s) => s.user_id), last });
+    } else {
+      const weight = mine.reduce((n, s) => n + (NEGATIVE[s.choice] ?? 0), 0);
+      if (weight) neg.push({ t, weight, who: mine.map((s) => s.user_id), last });
+    }
+  }
+  const newest = (a, b) => b.last.localeCompare(a.last);
+  return { pos: pos.sort(newest).slice(0, SEED_LIMIT), neg: neg.sort(newest).slice(0, NEG_SEED_LIMIT) };
+}
+
+// recsFor(seedKey) → that seed's TMDB recommendations (already mapped with fromTmdb).
+// exclude: keys not to suggest (already swiped, or the seeds themselves).
+export function recommend({ pos, neg }, recsFor, { exclude = new Set(), limit = 40, thisYear = new Date().getFullYear() } = {}) {
+  const scored = new Map();
+  const bump = (t, amount, seed) => {
+    if (exclude.has(t.key)) return;
+    const c = scored.get(t.key) ?? { t, score: 0, because: [] };
+    c.score += amount;
+    if (seed && amount > 0) c.because.push({ title: seed.t.title, who: seed.who, amount });
+    scored.set(t.key, c);
+  };
+  for (const seed of pos) (recsFor(seed.t.key) ?? []).forEach((t, i) => bump(t, seed.weight * rankWeight(i), seed));
+  for (const seed of neg) (recsFor(seed.t.key) ?? []).forEach((t, i) => bump(t, -NEG_FACTOR * seed.weight * rankWeight(i)));
+  return [...scored.values()]
+    .map((c) => ({ ...c, score: c.score * quality(c.t, thisYear), because: c.because.sort((a, b) => b.amount - a.amount).slice(0, 2) }))
+    .filter((c) => c.score > 0 && c.because.length)
+    .sort((a, b) => b.score - a.score || a.t.title.localeCompare(b.t.title))
+    .slice(0, limit);
+}
+
+// Small nudges: well-rated and recent titles rank a bit higher.
+function quality(t, thisYear) {
+  const rated = t.rating ? 0.8 + 0.2 * Math.min(t.rating, 9) / 9 : 0.9;
+  const recent = t.year && t.year >= thisYear - 2 ? 1.1 : 1;
+  return rated * recent;
+}
+
+// "✨ Because you both liked Panchayat & Kota Factory"
+export function becauseText(because, userId, nameOf, memberCount) {
+  if (!because?.length) return "";
+  const [first] = because;
+  const same = because.filter((b) => b.who.length === first.who.length && b.who.every((u) => first.who.includes(u)));
+  const who = memberCount >= 2 && first.who.length >= memberCount ? "you both"
+    : first.who.includes(userId) ? "you" : nameOf(first.who[0]);
+  return `✨ Because ${who} liked ${same.map((b) => b.title).join(" & ")}`;
+}
+
 // Used when no TMDB key is set: a few well-known titles so the deck isn't empty, newest first.
 export const STARTER = [
   ["movie", "The Shawshank Redemption", 1994], ["movie", "Inception", 2010], ["movie", "Interstellar", 2014],

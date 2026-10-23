@@ -15,6 +15,11 @@ export function tmdbResponse(url) {
       { id: 5, media_type: "person", name: "Some Actor" },
     ] };
   }
+  const recs = path.match(/^(movie|tv)\/(\d+)\/recommendations$/);
+  if (recs) return { results: Number(recs[2]) === 27205
+    ? [{ id: 7001, media_type: "movie", title: "Interstellar", release_date: "2014-11-05", vote_average: 8.4, vote_count: 30000 },
+       { id: 7002, media_type: "movie", title: "Tenet", release_date: "2020-08-22", vote_average: 7.2, vote_count: 9000 }]
+    : [{ id: 7002, media_type: "movie", title: "Tenet", release_date: "2020-08-22", vote_average: 7.2, vote_count: 9000 }] };
   const det = path.match(/^(movie|tv)\/(\d+)$/);
   if (det) return details(det[1], Number(det[2]));
   const person = path.match(/^person\/(\d+)\/combined_credits$/);

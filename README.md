@@ -16,6 +16,9 @@ A swipe app for two people sharing a couch. Each of you swipes through movies an
   plus ↶ undo. **🔍 Find** searches for a specific title.
 - **💕 Matches**: everything you *both* swiped right on, shown live on both phones with an "It's a match!" toast.
   🎲 **Pick one** chooses for tonight. Below that: what your partner wants that you haven't said yes to, and what only you want.
+- **✨ For you two**: titles similar to what either of you liked (TMDB recommendations for each ♥/👍), ranked so that
+  things you *both* liked, and things you liked after watching, count most; anything similar to what you rejected sinks.
+  They appear in the deck with a "✨ Because you both liked …" note, and as a list on the Matches tab. No AI, no server.
 - **🎬 Watched**: everything either of you has seen, with each person's 👍/👎.
 - **📋 My lists**: your own Want / Liked / Didn't / Nope lists. Change your mind, or ↺ put a title back in your deck.
 
