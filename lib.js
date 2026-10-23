@@ -52,15 +52,90 @@ export function fromTmdb(r, mediaType = r.media_type) {
 }
 
 export const posterUrl = (path, size = "w500") => (path ? `https://image.tmdb.org/t/p/${size}${path}` : null);
+export const faceUrl = (path) => (path ? `https://image.tmdb.org/t/p/w185${path}` : null);
 
-// Feeds pulled from TMDB for each filter, taken in turn one page at a time.
+// How many cast members a card shows (one row of big faces).
+export const CAST_LIMIT = 4;
+
+// TMDB movie/tv details (with append_to_response=credits,external_ids) → what the card shows.
+export function detailsFromTmdb(d, mediaType) {
+  const seasons = d.number_of_seasons;
+  const length = mediaType === "tv"
+    ? (seasons ? `${seasons} season${seasons === 1 ? "" : "s"}` : null)
+    : runtimeText(d.runtime);
+  return {
+    length,
+    genres: (d.genres ?? []).map((g) => g.name).slice(0, 3),
+    imdbId: d.imdb_id ?? d.external_ids?.imdb_id ?? null,
+    cast: (d.credits?.cast ?? []).slice(0, CAST_LIMIT).map((c) => ({ id: c.id, name: c.name, character: c.character || null, face: c.profile_path ?? null })),
+    overview: d.overview || null,
+    poster: d.poster_path ?? null,
+  };
+}
+
+export function runtimeText(mins) {
+  if (!mins) return null;
+  const h = Math.floor(mins / 60), m = mins % 60;
+  return h ? `${h}h${m ? ` ${m}m` : ""}` : `${m}m`;
+}
+
+// OMDb's rating is a string like "8.8", or "N/A".
+export const imdbRating = (omdb) => (omdb && /^\d+(\.\d)?$/.test(omdb.imdbRating ?? "") ? omdb.imdbRating : null);
+
+// Talk shows, news and award shows where the person just appears as themselves.
+const SELF_GENRES = new Set([10763, 10767]);
+const isSelf = (c) => /^(self|himself|herself|themselves)\b/i.test(c.character ?? "") || (c.genre_ids ?? []).some((g) => SELF_GENRES.has(g));
+
+// A person's combined_credits → their acting work, newest first (upcoming ones included),
+// one row per title.
+export function latestWork(credits, limit = 15) {
+  const seen = new Set();
+  return (credits.cast ?? [])
+    .filter((c) => !isSelf(c))
+    .map((c) => ({ t: fromTmdb(c, c.media_type), character: c.character || null, date: c.release_date || c.first_air_date || "" }))
+    .filter(({ t }) => t && !seen.has(t.key) && seen.add(t.key))
+    .sort((a, b) => (b.date || "0").localeCompare(a.date || "0"))
+    .slice(0, limit);
+}
+
+// Recent means released in the last RECENT_YEARS; those fill the first RECENT_PAGES
+// pages of the deck, then the all-time lists take over.
+export const RECENT_YEARS = 2;
+export const RECENT_PAGES = 8;
+export const CLASSIC_PAGES = 15;
+
+// TMDB lists for each filter. Recent ones are taken in turn one page at a time, then the classics.
 export const FEEDS = {
-  all:   ["trending/all/week", "movie/top_rated", "tv/top_rated", "movie/popular", "tv/popular"],
-  movie: ["trending/movie/week", "movie/top_rated", "movie/popular", "movie/now_playing"],
-  tv:    ["trending/tv/week", "tv/top_rated", "tv/popular", "tv/on_the_air"],
+  all:   { recent: ["trending/all/week", "discover/movie", "discover/tv"], classic: ["movie/top_rated", "tv/top_rated", "movie/popular", "tv/popular"] },
+  movie: { recent: ["trending/movie/week", "discover/movie", "movie/now_playing"], classic: ["movie/top_rated", "movie/popular"] },
+  tv:    { recent: ["trending/tv/week", "discover/tv", "tv/on_the_air"], classic: ["tv/top_rated", "tv/popular"] },
 };
-export const feedMediaType = (path) => (path.startsWith("movie/") || path.endsWith("/movie/week") ? "movie"
-  : path.startsWith("tv/") || path.endsWith("/tv/week") ? "tv" : undefined);
+export const feedMediaType = (path) => (/(^|\/)movie(\/|$)/.test(path) ? "movie" : /(^|\/)tv(\/|$)/.test(path) ? "tv" : undefined);
+
+// Popular titles released since `since` ("YYYY-MM-DD"), with enough votes to mean something.
+function recentParams(path, since) {
+  if (path === "discover/movie") return { sort_by: "popularity.desc", "primary_release_date.gte": since, "vote_count.gte": "100" };
+  if (path === "discover/tv") return { sort_by: "popularity.desc", "first_air_date.gte": since, "vote_count.gte": "30" };
+  return {};
+}
+
+export function yearsAgo(today, n) {
+  const d = new Date(today.getFullYear() - n, today.getMonth(), today.getDate());
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+// The n-th request to make for a filter: { path, params } with the page number, or null when done.
+export function feedRequest(filter, n, today = new Date()) {
+  const { recent, classic } = FEEDS[filter];
+  const since = yearsAgo(today, RECENT_YEARS);
+  if (n < recent.length * RECENT_PAGES) {
+    const path = recent[n % recent.length];
+    return { path, params: { ...recentParams(path, since), page: Math.floor(n / recent.length) + 1 } };
+  }
+  const m = n - recent.length * RECENT_PAGES;
+  if (m >= classic.length * CLASSIC_PAGES) return null;
+  return { path: classic[m % classic.length], params: { page: Math.floor(m / classic.length) + 1 } };
+}
 
 export const matchesFilter = (t, filter) => filter === "all" || t.media_type === filter;
 
@@ -151,7 +226,7 @@ export function partnerNote(swipes, titleId, userId, nameOf) {
   return notes.join(" · ");
 }
 
-// Used when no TMDB key is set: a few well-known titles so the deck isn't empty.
+// Used when no TMDB key is set: a few well-known titles so the deck isn't empty, newest first.
 export const STARTER = [
   ["movie", "The Shawshank Redemption", 1994], ["movie", "Inception", 2010], ["movie", "Interstellar", 2014],
   ["movie", "Parasite", 2019], ["movie", "Spirited Away", 2001], ["movie", "The Dark Knight", 2008],
@@ -163,7 +238,8 @@ export const STARTER = [
   ["tv", "Panchayat", 2020], ["tv", "Succession", 2018], ["tv", "The Bear", 2022],
   ["tv", "Ted Lasso", 2020], ["tv", "Fleabag", 2016], ["tv", "Severance", 2022],
   ["tv", "Schitt's Creek", 2015], ["tv", "Kota Factory", 2019], ["tv", "Stranger Things", 2016],
-].map(([media_type, title, year]) => ({ key: titleKey(media_type, null, title), media_type, tmdb_id: null, title, year, poster: null, overview: null, rating: null }));
+].map(([media_type, title, year]) => ({ key: titleKey(media_type, null, title), media_type, tmdb_id: null, title, year, poster: null, overview: null, rating: null }))
+  .sort((a, b) => b.year - a.year);
 
 // A stable gradient per title for cards without a poster.
 export function hue(s) {

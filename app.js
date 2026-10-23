@@ -1,8 +1,9 @@
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.4/+esm";
-import { SUPABASE_URL, SUPABASE_KEY, USERNAME_EMAIL_DOMAIN, TMDB_KEY, TMDB_REGION } from "./config.js";
+import { SUPABASE_URL, SUPABASE_KEY, USERNAME_EMAIL_DOMAIN, TMDB_KEY, TMDB_REGION, OMDB_KEY } from "./config.js";
 import {
-  CHOICES, esc, cleanName, mediaLabel, choiceFromDrag, dragProgress, titleKey, fromTmdb, posterUrl,
-  FEEDS, feedMediaType, buildDeck, choicesFor, matches, onlyWants, watchedList, myList,
+  CHOICES, esc, cleanName, mediaLabel, choiceFromDrag, dragProgress, titleKey, fromTmdb, posterUrl, faceUrl,
+  detailsFromTmdb, imdbRating, latestWork,
+  feedRequest, feedMediaType, buildDeck, choicesFor, matches, onlyWants, watchedList, myList,
   partnerNote, STARTER, hue,
 } from "./lib.js";
 
@@ -21,7 +22,6 @@ const toEmail = (u) => `${u.trim().toLowerCase()}@${USERNAME_EMAIL_DOMAIN}`;
 
 // How many cards to keep queued up before fetching more from TMDB.
 const DECK_MIN = 6;
-const MAX_FEED_PAGES = 20;
 
 let state = freshState();
 function freshState() {
@@ -142,6 +142,7 @@ function showMain() {
   $("#pick").addEventListener("click", pickOne);
   setupDrag($("#deck"));
   setupSearch();
+  setupPerson();
   $("#tmdb-credit").hidden = !TMDB_KEY;
   showView("swipe");
 
@@ -164,7 +165,7 @@ function showView(view) {
 }
 
 function onKey(e) {
-  if (!$("#deck") || $(".swipe-view").hidden || $("#search")?.open) return;
+  if (!$("#deck") || $(".swipe-view").hidden || $("#search")?.open || $("#person")?.open) return;
   if (e.target.closest?.("input, select, textarea")) return;
   const choice = { ArrowLeft: "no", ArrowRight: "yes", ArrowUp: "liked", ArrowDown: "disliked" }[e.key];
   if (choice) { e.preventDefault(); swipeTop(choice); }
@@ -228,7 +229,7 @@ function renderAll() {
 
 // ---------------------------------------------------------------- deck ----
 
-// TMDB feed per filter: items fetched so far, and which page of which list is next.
+// TMDB feed per filter: items fetched so far, and how many requests have been made (see feedRequest).
 function feedFor(filter) {
   return (state.feeds[filter] ??= TMDB_KEY ? { items: [], n: 0, loading: false, done: false } : { items: STARTER, done: true });
 }
@@ -239,13 +240,10 @@ async function loadMore(filter) {
   f.loading = true;
   try {
     for (let tries = 0; tries < 3; tries++) {
-      const list = FEEDS[filter];
-      const src = list[f.n % list.length];
-      const page = Math.floor(f.n / list.length) + 1;
-      f.n++;
-      if (page > MAX_FEED_PAGES) { f.done = true; break; }
-      const results = await tmdb(src, { page });
-      const items = results.map((r) => fromTmdb(r, feedMediaType(src) ?? r.media_type)).filter(Boolean);
+      const req = feedRequest(filter, f.n++);
+      if (!req) { f.done = true; break; }
+      const results = await tmdb(req.path, req.params);
+      const items = results.map((r) => fromTmdb(r, feedMediaType(req.path) ?? r.media_type)).filter(Boolean);
       f.items.push(...items);
       if (currentDeck(filter).length >= DECK_MIN) break;
     }
@@ -258,11 +256,33 @@ async function loadMore(filter) {
   }
 }
 
-async function tmdb(path, params = {}) {
+async function tmdbGet(path, params = {}) {
   const q = new URLSearchParams({ api_key: TMDB_KEY, language: "en-US", ...(TMDB_REGION ? { region: TMDB_REGION } : {}), ...params });
   const res = await fetch(`https://api.themoviedb.org/3/${path}?${q}`);
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-  return (await res.json()).results ?? [];
+  return res.json();
+}
+const tmdb = async (path, params) => (await tmdbGet(path, params)).results ?? [];
+
+// Runtime, genres, cast and IMDb rating per title key, fetched when its card comes near the top.
+const details = new Map();
+
+function ensureDetails(t) {
+  if (!TMDB_KEY || !t.tmdb_id || details.has(t.key)) return;
+  details.set(t.key, null);
+  (async () => {
+    const d = detailsFromTmdb(await tmdbGet(`${t.media_type}/${t.tmdb_id}`, { append_to_response: "credits,external_ids" }), t.media_type);
+    if (OMDB_KEY && d.imdbId) {
+      try {
+        const r = await fetch(`https://www.omdbapi.com/?${new URLSearchParams({ i: d.imdbId, apikey: OMDB_KEY })}`);
+        d.imdb = imdbRating(await r.json());
+      } catch (e) {
+        console.warn("OMDb:", e.message);
+      }
+    }
+    details.set(t.key, d);
+    renderDeck();
+  })().catch((e) => { console.warn("TMDB details:", e.message); details.delete(t.key); });
 }
 
 function currentDeck(filter = state.filter) {
@@ -292,7 +312,8 @@ async function renderDeck() {
   }
 
   const show = deck.slice(0, 3);
-  const keys = show.map((t) => t.key + ":" + (partnerNoteFor(t) || "")).join("|");
+  show.slice(0, 2).forEach(ensureDetails);
+  const keys = show.map((t) => t.key + ":" + (partnerNoteFor(t) || "") + ":" + !!details.get(t.key)).join("|");
   $("#undo").disabled = !state.undo.length;
   if (keys === rendered && el.childElementCount) return;
   rendered = keys;
@@ -305,18 +326,35 @@ async function renderDeck() {
 const partnerNoteFor = (t) => (t.id ? partnerNote(state.swipes, t.id, state.user.id, nameOf) : "");
 
 function cardHtml(t, i) {
-  const poster = posterUrl(t.poster);
+  const d = details.get(t.key);
+  const poster = posterUrl(d?.poster ?? t.poster);
   const note = partnerNoteFor(t);
-  const meta = [t.year, mediaLabel(t.media_type), t.rating ? `⭐ ${t.rating}` : null].filter(Boolean).join(" · ");
-  return `<article class="mcard${i === 0 ? " top" : ""}" data-key="${esc(t.key)}" style="--i:${i}; --h:${hue(t.title)}" ${i === 0 ? `tabindex="0" aria-label="${esc(t.title)}"` : `aria-hidden="true"`}>
-    ${poster ? `<img src="${esc(poster)}" alt="" draggable="false" onerror="this.remove()" ${i ? `loading="lazy"` : ""}>` : `<div class="ph"><span>${t.media_type === "tv" ? "📺" : "🎬"}</span></div>`}
+  const overview = d?.overview ?? t.overview;
+  const rating = d?.imdb ? `<span class="badge-imdb"><b>IMDb</b> ★ ${esc(d.imdb)}</span>`
+    : t.rating ? `<span class="badge-tmdb"><b>TMDB</b> ★ ${esc(t.rating)}</span>` : "";
+  const meta = [t.year, mediaLabel(t.media_type), d?.length].filter(Boolean).join(" · ");
+  const cast = d?.cast ?? [];
+  return `<article class="mcard dcard${i === 0 ? " top" : ""}" data-key="${esc(t.key)}" style="--i:${i}; --h:${hue(t.title)}" ${i === 0 ? `tabindex="0" aria-label="${esc(t.title)}"` : `aria-hidden="true"`}>
+    ${poster ? `<div class="backdrop" style="background-image:url('${esc(posterUrl(d?.poster ?? t.poster, "w342"))}')"></div>` : ""}
     <div class="stamp s-yes">WANT ♥</div><div class="stamp s-no">NOPE</div>
     <div class="stamp s-liked">LOVED IT 👍</div><div class="stamp s-disliked">MEH 👎</div>
-    <div class="info">
-      ${note ? `<div class="note">${esc(note)}</div>` : ""}
-      <h2>${esc(t.title)}</h2>
-      <div class="meta">${esc(meta)}</div>
-      ${t.overview ? `<p class="overview">${esc(t.overview)}</p>` : ""}
+    <div class="body">
+      <div class="head">
+        <div class="poster">${poster ? `<img src="${esc(poster)}" alt="" draggable="false" onerror="this.remove()" ${i ? `loading="lazy"` : ""}>` : ""}<span class="ph">${t.media_type === "tv" ? "📺" : "🎬"}</span></div>
+        <div class="facts">
+          ${note ? `<div class="note">${esc(note)}</div>` : ""}
+          <h2>${esc(t.title)}</h2>
+          ${rating ? `<div>${rating}</div>` : ""}
+          <div class="meta">${esc(meta)}</div>
+          ${d?.genres.length ? `<div class="genres">${d.genres.map((g) => `<span>${esc(g)}</span>`).join("")}</div>` : ""}
+        </div>
+      </div>
+      ${overview ? `<div class="lbl">Story</div><p class="overview">${esc(overview)}</p>` : ""}
+      ${cast.length ? `<div class="lbl">Cast <span>tap a face for their latest</span></div>
+      <div class="cast">${cast.map((c) => `<button type="button" class="face" data-person="${c.id}" data-name="${esc(c.name)}" data-face="${esc(c.face ?? "")}" aria-label="${esc(c.name)}: latest movies and shows">
+        ${c.face ? `<img src="${esc(faceUrl(c.face))}" alt="" draggable="false" loading="lazy">` : `<span class="noface">${esc(c.name[0] ?? "?")}</span>`}
+        <span class="n">${esc(c.name)}</span>${c.character ? `<span class="r">${esc(c.character)}</span>` : ""}</button>`).join("")}</div>`
+        : d === null ? `<div class="lbl">Cast</div><div class="cast loading">${"<span class=\"face\"><span class=\"noface\"></span></span>".repeat(3)}</div>` : ""}
     </div>
   </article>`;
 }
@@ -333,7 +371,7 @@ function setupDrag(deck) {
     if (!card || flying || (e.pointerType === "mouse" && e.button !== 0)) return;
     card.setPointerCapture(e.pointerId);
     card.style.transition = "none";
-    drag = { card, id: e.pointerId, x: e.clientX, y: e.clientY, dx: 0, dy: 0 };
+    drag = { card, id: e.pointerId, x: e.clientX, y: e.clientY, dx: 0, dy: 0, face: e.target.closest("[data-person]") };
   });
   deck.addEventListener("pointermove", (e) => {
     if (!drag || e.pointerId !== drag.id) return;
@@ -343,13 +381,17 @@ function setupDrag(deck) {
   });
   const end = (e) => {
     if (!drag || e.pointerId !== drag.id) return;
-    const { card, dx, dy } = drag;
+    const { card, dx, dy, face } = drag;
     drag = null;
     const choice = e.type === "pointerup" ? choiceFromDrag(dx, dy) : null;
     if (choice) return fly(card, choice, dx, dy);
     card.style.transition = "";
     place(card, 0, 0);
-    if (e.type === "pointerup" && Math.hypot(dx, dy) < 8) card.classList.toggle("expanded");
+    // A tap (not a drag): on a face opens that person, anywhere else shows the full story.
+    if (e.type === "pointerup" && Math.hypot(dx, dy) < 8) {
+      if (face) openPerson(face.dataset);
+      else card.classList.toggle("expanded");
+    }
     renderDeck();
   };
   deck.addEventListener("pointerup", end);
@@ -558,23 +600,59 @@ function setupSearch() {
     renderResults(found);
   });
 
-  $("#results").addEventListener("click", async (e) => {
+  bindPickList($("#results"));
+}
+
+const renderResults = (found) => renderPickList($("#results"), found);
+
+// A list of titles (search results, someone's latest work) with buttons to swipe each one.
+function renderPickList(el, found, subs = []) {
+  el.found = found;
+  el.subs = subs;
+  el.innerHTML = found.length ? found.map((t, i) => {
+    const existing = state.titles.find((x) => x.key === t.key);
+    const mine = existing ? choicesFor(state.swipes, existing.id)[state.user.id] : null;
+    return rowHtml(t, `<div class="choices">${["yes", "liked", "disliked", "no"].map((c) =>
+      `<button data-pick="${c}" data-i="${i}" class="c-${c} ${mine === c ? "on" : ""}" aria-label="${CHOICES[c].label}" title="${CHOICES[c].label}">${CHOICES[c].icon}</button>`).join("")}</div>`, subs[i] ?? "");
+  }).join("") : `<li class="muted">No results.</li>`;
+}
+
+function bindPickList(el) {
+  el.addEventListener("click", async (e) => {
     const b = e.target.closest("[data-pick]");
     if (!b) return;
-    const t = found[Number(b.dataset.i)];
+    const t = el.found[Number(b.dataset.i)];
     b.closest(".choices").querySelectorAll("button").forEach((x) => (x.disabled = true));
     const { error } = await sb.rpc("swipe", { p_title: titlePayload(t), p_choice: b.dataset.pick });
     if (error) return toast(error.message);
     await loadData();
-    renderResults(found);
+    renderPickList(el, el.found, el.subs);
   });
 }
 
-function renderResults(found) {
-  $("#results").innerHTML = found.length ? found.map((t, i) => {
-    const existing = state.titles.find((x) => x.key === t.key);
-    const mine = existing ? choicesFor(state.swipes, existing.id)[state.user.id] : null;
-    return rowHtml(t, `<div class="choices">${["yes", "liked", "disliked", "no"].map((c) =>
-      `<button data-pick="${c}" data-i="${i}" class="c-${c} ${mine === c ? "on" : ""}" aria-label="${CHOICES[c].label}" title="${CHOICES[c].label}">${CHOICES[c].icon}</button>`).join("")}</div>`);
-  }).join("") : `<li class="muted">No results.</li>`;
+// -------------------------------------------------------------- person ----
+
+function setupPerson() {
+  const dlg = $("#person");
+  $("#close-person").addEventListener("click", () => dlg.close());
+  dlg.addEventListener("close", () => renderDeck());
+  bindPickList($("#credits"));
+}
+
+async function openPerson({ person, name, face }) {
+  const dlg = $("#person");
+  $("#person-name").textContent = name;
+  const img = $("#person-face");
+  img.hidden = !face;
+  if (face) img.src = faceUrl(face);
+  $("#credits").innerHTML = `<li class="muted">Loading…</li>`;
+  dlg.showModal();
+  try {
+    const work = latestWork(await tmdbGet(`person/${person}/combined_credits`));
+    const today = new Date().toISOString().slice(0, 10);
+    renderPickList($("#credits"), work.map((w) => w.t), work.map((w) =>
+      [w.character ? `as ${esc(w.character)}` : null, w.date > today ? "Upcoming" : null].filter(Boolean).join(" · ")));
+  } catch (e) {
+    $("#credits").innerHTML = `<li class="error">Couldn't load: ${esc(e.message)}</li>`;
+  }
 }

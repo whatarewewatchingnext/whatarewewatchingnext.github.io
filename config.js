@@ -15,3 +15,7 @@ export const TMDB_KEY = "";
 
 // Optional: ISO 3166 country for "now playing" and TMDB results (e.g. "IN", "US").
 export const TMDB_REGION = "";
+
+// Optional free OMDb key from https://www.omdbapi.com/apikey.aspx for IMDb ratings on cards.
+// Without it, cards show TMDB's own rating instead.
+export const OMDB_KEY = "";

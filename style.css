@@ -150,23 +150,73 @@ body.swiping main { padding-bottom: 0; }
 }
 .mcard.top { touch-action: none; cursor: grab; }
 .mcard.top:active { cursor: grabbing; }
-.mcard:not(.top) .info { opacity: 0; }
-.mcard > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
-.mcard .ph { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 24px 24px 140px; color: #fff; text-align: center; }
-.mcard .ph span { font-size: 5rem; opacity: .9; }
-.mcard .info {
-  position: absolute; left: 0; right: 0; bottom: 0; padding: 60px 18px 16px; color: #fff;
-  background: linear-gradient(transparent, rgb(0 0 0 / .55) 35%, rgb(0 0 0 / .85));
+/* Detail card: big poster + facts, story, tappable cast faces */
+.dcard { background: #17131c; color: #fff; }
+.dcard .backdrop { position: absolute; inset: -30px; background-size: cover; background-position: center; filter: blur(28px) saturate(1.3); opacity: .45; pointer-events: none; }
+.dcard::after { content: ""; position: absolute; inset: 0; background: linear-gradient(rgb(23 19 28 / .2), #17131c 62%); pointer-events: none; }
+.dcard .body { position: relative; z-index: 1; height: 100%; display: flex; flex-direction: column; gap: 8px; padding: 14px 14px 12px; overflow: hidden; }
+.dcard .head { display: flex; gap: 14px; flex: 0 0 auto; }
+.dcard .poster {
+  position: relative; flex: 0 0 46%; aspect-ratio: 2 / 3; border-radius: 12px; overflow: hidden;
+  background: linear-gradient(160deg, hsl(var(--h) 55% 50%), hsl(calc(var(--h) + 50) 50% 25%)); box-shadow: 0 6px 18px rgb(0 0 0 / .45);
 }
-.mcard .info h2 { font-size: 1.5rem; margin: 0; line-height: 1.15; }
-.mcard .info .meta { font-size: .9rem; opacity: .85; margin-top: 2px; }
-.mcard .note { display: inline-block; background: rgb(255 255 255 / .2); backdrop-filter: blur(6px); border-radius: 999px; padding: 3px 10px; font-size: .82rem; margin-bottom: 8px; }
-.mcard .overview {
-  margin: 8px 0 0; font-size: .9rem; opacity: .9;
-  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+.dcard .poster img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; pointer-events: none; z-index: 1; }
+.dcard .poster .ph { position: absolute; inset: 0; display: grid; place-items: center; font-size: 3rem; }
+.dcard .facts { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; padding-top: 2px; }
+.dcard h2 { font-size: 1.4rem; line-height: 1.12; margin: 0; overflow-wrap: anywhere; }
+.dcard .meta { font-size: .88rem; opacity: .85; }
+.dcard .note { align-self: flex-start; background: rgb(255 255 255 / .16); border-radius: 999px; padding: 3px 10px; font-size: .78rem; }
+.badge-imdb, .badge-tmdb { display: inline-flex; align-items: center; gap: 5px; border-radius: 6px; padding: 2px 8px; font-weight: 800; font-size: .9rem; }
+.badge-imdb { background: #f5c518; color: #000; }
+.badge-imdb b { font-family: Impact, "Arial Black", sans-serif; font-size: .8rem; letter-spacing: .02em; }
+.badge-tmdb { background: #0d253f; color: #fff; border: 1px solid #01b4e4; }
+.badge-tmdb b { color: #01b4e4; font-size: .74rem; }
+.dcard .genres { display: flex; flex-wrap: wrap; gap: 5px; }
+.dcard .genres span { background: rgb(255 255 255 / .14); border-radius: 999px; padding: 2px 9px; font-size: .76rem; }
+.dcard .lbl { font-size: .7rem; text-transform: uppercase; letter-spacing: .09em; opacity: .55; margin-top: 2px; }
+.dcard .lbl span { text-transform: none; letter-spacing: 0; opacity: .8; margin-left: 4px; }
+.dcard .overview {
+  margin: -2px 0 0; font-size: .88rem; line-height: 1.4; opacity: .92;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; flex: 0 0 auto;
 }
-.mcard.expanded .info { top: 0; display: flex; flex-direction: column; justify-content: flex-end; background: rgb(0 0 0 / .78); }
-.mcard.expanded .overview { -webkit-line-clamp: unset; overflow-y: auto; }
+.dcard.expanded .overview { -webkit-line-clamp: 12; }
+.dcard .cast { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; flex: 0 0 auto; }
+.dcard .face {
+  display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 2px 0; border: 0; border-radius: 12px;
+  background: none; color: #fff; font-size: .74rem; line-height: 1.15; text-align: center; min-width: 0;
+}
+.dcard .face img, .dcard .face .noface {
+  width: 72px; height: 72px; border-radius: 50%; object-fit: cover; flex: 0 0 auto; pointer-events: none;
+  border: 2px solid rgb(255 255 255 / .35); background: rgb(255 255 255 / .1); display: grid; place-items: center; font-size: 1.4rem; font-weight: 700;
+}
+.dcard .face .n { font-weight: 600; max-width: 100%; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+.dcard .face .r { opacity: .6; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dcard .cast.loading .noface { animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .4; } }
+/* Shorter phones: smaller poster, two lines of story */
+@media (max-height: 760px) {
+  .dcard .poster { flex-basis: 38%; }
+  .dcard .overview { -webkit-line-clamp: 2; }
+  .dcard .face img, .dcard .face .noface { width: 60px; height: 60px; }
+}
+@media (max-height: 640px) {
+  .dcard .poster { flex-basis: 34%; }
+  .dcard .lbl:first-of-type, .dcard .overview { display: none; }
+}
+
+/* Person sheet */
+dialog.sheet {
+  width: min(560px, calc(100vw - 24px)); max-height: calc(100dvh - 48px); margin: auto;
+  border: 1px solid var(--border); border-radius: 16px; padding: 14px; background: var(--card); color: var(--text);
+}
+dialog.sheet::backdrop { background: rgb(0 0 0 / .45); }
+.person-head { display: flex; align-items: center; gap: 14px; }
+.person-head img { width: 84px; height: 84px; border-radius: 50%; object-fit: cover; background: var(--chip); }
+.person-head h2 { margin: 0; }
+#credits { max-height: calc(100dvh - 240px); overflow-y: auto; }
+/* Search results and someone's latest work: buttons go under the title so it has room */
+#credits li, #results li { flex-wrap: wrap; row-gap: 6px; }
+#credits .choices, #results .choices { flex-basis: 100%; padding-left: 56px; }
 
 .stamp {
   position: absolute; z-index: 2; opacity: 0; pointer-events: none;

@@ -61,7 +61,7 @@ export async function stopAll() {
 }
 
 // Opens the app with the given seed. `tmdb: false` runs without a TMDB key.
-export async function openApp(seed = baseSeed(), { width = 375, height = 812, tmdb = true } = {}) {
+export async function openApp(seed = baseSeed(), { width = 375, height = 812, tmdb = true, omdb = true } = {}) {
   const context = await browser.newContext({ viewport: { width, height }, timezoneId: "America/Los_Angeles", locale: "en-US", hasTouch: true });
   const page = await context.newPage();
   const errors = [];
@@ -78,6 +78,11 @@ export async function openApp(seed = baseSeed(), { width = 375, height = 812, tm
     tmdbCalls.push(url.pathname.replace("/3/", "") + url.search);
     route.fulfill({ contentType: "application/json", body: JSON.stringify(tmdbResponse(url)) });
   });
+  await page.route(/www\.omdbapi\.com\//, (route) => {
+    const id = new URL(route.request().url()).searchParams.get("i");
+    tmdbCalls.push(`omdb:${id}`);
+    route.fulfill({ contentType: "application/json", body: JSON.stringify({ imdbID: id, imdbRating: "8.8" }) });
+  });
   // Posters load as a plain rectangle, except paths containing "broken", which 404.
   await page.route(/image\.tmdb\.org\/t\/p\//, (route) => /broken/.test(route.request().url()) ? route.fulfill({ status: 404 }) : route.fulfill({ contentType: "image/svg+xml",
     body: `<svg xmlns="http://www.w3.org/2000/svg" width="500" height="750"><rect width="500" height="750" fill="#345"/></svg>` }));
@@ -85,7 +90,8 @@ export async function openApp(seed = baseSeed(), { width = 375, height = 812, tm
     const body = (await readFile(join(ROOT, "config.js"), "utf8"))
       .replace(/SUPABASE_URL = ".*"/, `SUPABASE_URL = "https://fake.supabase.co"`)
       .replace(/SUPABASE_KEY = ".*"/, `SUPABASE_KEY = "sb_publishable_fake"`)
-      .replace(/TMDB_KEY = ".*"/, `TMDB_KEY = "${tmdb ? "fake-tmdb-key" : ""}"`);
+      .replace(/TMDB_KEY = ".*"/, `TMDB_KEY = "${tmdb ? "fake-tmdb-key" : ""}"`)
+      .replace(/OMDB_KEY = ".*"/, `OMDB_KEY = "${omdb ? "fake-omdb-key" : ""}"`);
     route.fulfill({ contentType: "text/javascript", body });
   });
   await page.addInitScript((s) => { window.__SEED = s; }, seed);

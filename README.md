@@ -9,8 +9,11 @@ A swipe app for two people sharing a couch. Each of you swipes through movies an
 | ↑ up | 👍 Already watched it, liked it |
 | ↓ down | 👎 Already watched it, didn't like it |
 
-- **🃏 Swipe**: a card deck with posters, filterable to All / Movies / Shows. Titles your partner said yes to jump to the
-  front with a "💕 wants to watch" note. There are buttons and arrow keys too, plus ↶ undo. Tap a card for the full description. **🔍 Find** searches for a specific title.
+- **🃏 Swipe**: each card shows the poster, IMDb rating, year, length, genres, story and the main cast with photos.
+  Tap a face to see that person's latest movies and shows (newest first) and swipe on those too. Tap anywhere else for
+  the full story. The deck starts with titles from the last 2 years, then all-time favourites; filter to All / Movies / Shows.
+  Titles your partner said yes to jump to the front with a "💕 wants to watch" note. There are buttons and arrow keys too,
+  plus ↶ undo. **🔍 Find** searches for a specific title.
 - **💕 Matches**: everything you *both* swiped right on, shown live on both phones with an "It's a match!" toast.
   🎲 **Pick one** chooses for tonight. Below that: what your partner wants that you haven't said yes to, and what only you want.
 - **🎬 Watched**: everything either of you has seen, with each person's 👍/👎.
@@ -39,7 +42,9 @@ you can regenerate it on TMDB.
 5. Get a free TMDB key: sign up at [themoviedb.org](https://www.themoviedb.org/signup), then
    **Settings → API → Create → Developer**, and copy the **API Key** (the short one, not the Read Access Token) into
    `TMDB_KEY` in `config.js`. Optionally set `TMDB_REGION` (e.g. `"IN"` or `"US"`).
-   Without a key the app still works, with a built-in list of ~30 well-known titles and no posters.
+   Without a key the app still works, with a built-in list of ~30 well-known titles and no posters or cast.
+   Optional: for real **IMDb** ratings, get a free key at [omdbapi.com](https://www.omdbapi.com/apikey.aspx) and put it in
+   `OMDB_KEY` (1,000 lookups a day; one per card). Without it, cards show TMDB's own rating.
 6. Commit and push. In the GitHub repo: **Settings → Pages → Deploy from branch → `main` / root**.
 7. Open the site on your phone, **Sign up** with a username and password, then **Create** a household.
    Go to the 🏠 tab and send the join code to your partner. They sign up and **Join** with that code.

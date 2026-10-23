@@ -2,6 +2,8 @@ import { test, describe, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { startAll, stopAll, openApp, baseSeed, texts, tab, settle, topTitle } from "./helpers.js";
 
+const flat = (s) => s.replace(/\s+/g, " ").trim();
+
 before(startAll);
 after(stopAll);
 
@@ -84,9 +86,11 @@ describe("auth", () => {
 describe("deck", () => {
   test("household titles first, then the TMDB feed; never another household's titles", () => withApp(baseSeed(), async ({ page, tmdbCalls }) => {
     assert.equal(await topTitle(page), "Inception");
-    assert.match(await page.getAttribute("#deck .mcard.top img", "src"), /image\.tmdb\.org\/t\/p\/w500\/inception\.jpg/);
+    assert.match(await page.getAttribute("#deck .mcard.top .poster img", "src"), /image\.tmdb\.org\/t\/p\/w500\/inception\.jpg/);
     assert.equal(await page.locator("#deck .mcard").count(), 3);
-    assert.ok(tmdbCalls.some((c) => c.startsWith("trending/all/week") && c.includes("api_key=fake-tmdb-key")));
+    assert.ok(tmdbCalls[0].startsWith("trending/all/week") && tmdbCalls[0].includes("api_key=fake-tmdb-key"), tmdbCalls[0]);
+    assert.ok(tmdbCalls.some((c) => c.startsWith("discover/movie") && c.includes("primary_release_date.gte=2024-10-21")), "recent movies asked for");
+    assert.ok(!tmdbCalls.some((c) => c.includes("top_rated")), "all-time lists wait until recent ones run out");
     for (let i = 0; i < 8; i++) {
       assert.notEqual(await topTitle(page), "Stranger secret film");
       await page.click("[data-swipe=no]");
@@ -135,12 +139,12 @@ describe("deck", () => {
     seed.titles[0].poster = "/broken.jpg";
     return withApp(seed, async ({ page }) => {
       assert.equal(await topTitle(page), "Inception");
-      await page.waitForFunction(() => !document.querySelector("#deck .mcard.top img"));
+      await page.waitForFunction(() => !document.querySelector("#deck .mcard.top .poster img"));
     });
   });
 
   test("tapping a card shows the full description", () => withApp(baseSeed(), async ({ page }) => {
-    await page.click("#deck .mcard.top");
+    await page.click("#deck .mcard.top .head");
     assert.equal(await page.$eval("#deck .mcard.top", (e) => e.classList.contains("expanded")), true);
   }));
 
@@ -181,7 +185,7 @@ describe("deck", () => {
     await page.click("[data-filter=movie]");
     await settle(page);
     assert.equal(await topTitle(page), "Inception");
-    assert.match(await page.textContent("#deck .mcard.top .meta"), /2010 · Movie · ⭐ 8\.4/);
+    assert.match(await page.textContent("#deck .mcard.top .meta"), /^2010 · Movie/);
   }));
 
   test("a title my partner wants jumps to the front, with a note", () => {
@@ -191,9 +195,60 @@ describe("deck", () => {
     return withApp(seed, async ({ page }) => {
       assert.equal(await topTitle(page), "Panchayat");
       assert.equal(await page.textContent("#deck .mcard.top .note"), "💕 wife wants to watch");
-      assert.equal(await page.locator("#deck .mcard.top .ph").count(), 1, "no poster → placeholder");
+      assert.equal(await page.locator("#deck .mcard.top .poster img").count(), 0, "no poster → placeholder");
     });
   });
+});
+
+describe("card details + cast", () => {
+  test("shows IMDb rating, runtime, genres, story and cast faces", () => withApp(baseSeed(), async ({ page, tmdbCalls }) => {
+    await page.waitForSelector("#deck .mcard.top .face");
+    const card = "#deck .mcard.top";
+    assert.equal(await page.textContent(`${card} h2`), "Inception");
+    assert.equal(flat(await page.textContent(`${card} .badge-imdb`)), "IMDb ★ 8.8");
+    assert.equal(await page.textContent(`${card} .meta`), "2010 · Movie · 2h 28m");
+    assert.deepEqual(await texts(page, `${card} .genres span`), ["Drama", "Comedy", "Crime"]);
+    assert.equal(await page.textContent(`${card} .overview`), "Full story of 27205.");
+    assert.equal(await page.locator(`${card} .face`).count(), 4);
+    assert.equal(await page.locator(`${card} .face img`).count(), 3, "missing photo shows an initial");
+    assert.match(await page.getAttribute(`${card} .face img`, "src"), /image\.tmdb\.org\/t\/p\/w185\/face0\.jpg/);
+    assert.ok(tmdbCalls.some((c) => c.startsWith("movie/27205?") && c.includes("append_to_response=credits%2Cexternal_ids")));
+    assert.ok(tmdbCalls.includes("omdb:tt27205"));
+  }));
+
+  test("without an OMDb key the TMDB rating shows instead", () => withApp(baseSeed(), async ({ page, tmdbCalls }) => {
+    await page.waitForSelector("#deck .mcard.top .face");
+    assert.equal(flat(await page.textContent("#deck .mcard.top .badge-tmdb")), "TMDB ★ 8.4");
+    assert.equal(await page.locator("#deck .mcard.top .badge-imdb").count(), 0);
+    assert.ok(!tmdbCalls.some((c) => c.startsWith("omdb:")));
+  }, { omdb: false }));
+
+  test("tapping a face shows their latest work, newest first, and you can swipe it", () => withApp(baseSeed(), async ({ page, db }) => {
+    await page.waitForSelector("#deck .mcard.top .face");
+    await page.click("#deck .mcard.top .face >> nth=1");
+    await page.waitForSelector("#person[open] #credits li .t");
+    assert.equal(await page.textContent("#person-name"), "Actor 205-1");
+    assert.deepEqual(await texts(page, "#credits .t"), ["Next Year Film", "Recent Show", "Old Film", "Undated Film"], "no talk shows, no duplicates");
+    assert.match((await texts(page, "#credits li"))[0], /as Hero · Upcoming/);
+    await page.click("#credits li:has-text('Recent Show') [data-pick=yes]");
+    await settle(page);
+    assert.equal(await mySwipe(db, "Recent Show"), "yes");
+    await page.click("#close-person");
+    assert.equal(await page.isVisible("#person"), false);
+    assert.equal(await topTitle(page), "Inception", "card is still there");
+  }));
+
+  test("a drag that starts on a face still swipes", () => withApp(baseSeed(), async ({ page, db }) => {
+    await page.waitForSelector("#deck .mcard.top .face");
+    const box = await page.locator("#deck .mcard.top .face >> nth=0").boundingBox();
+    await page.mouse.move(box.x + box.width / 2, box.y + 20);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 200, box.y + 30, { steps: 8 });
+    await page.mouse.up();
+    await settle(page);
+    assert.equal(await mySwipe(db, "Inception"), "yes");
+    assert.equal(await page.isVisible("#person"), false);
+  }));
 });
 
 describe("matches", () => {
@@ -299,7 +354,7 @@ describe("without a TMDB key", () => {
     assert.equal(await topTitle(page), "Inception");
     await page.click("[data-swipe=no]");
     await settle(page);
-    assert.equal(await topTitle(page), "The Shawshank Redemption");
+    assert.equal(await topTitle(page), "Dune: Part Two", "newest starter title first");
     await page.click("#open-search");
     assert.equal(await page.isVisible("#search-form [name=media]"), true);
     await page.fill("#search-form [name=q]", "  Kota   Factory ");

@@ -2,7 +2,8 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import {
   CHOICES, SWIPE_THRESHOLD, esc, cleanName, mediaLabel, choiceFromDrag, dragProgress, titleKey, fromTmdb, posterUrl,
-  FEEDS, feedMediaType, buildDeck, choicesFor, matches, onlyWants, watchedList, myList, isMatch, partnerNote, STARTER, hue,
+  detailsFromTmdb, runtimeText, imdbRating, latestWork, faceUrl, CAST_LIMIT,
+  FEEDS, RECENT_PAGES, CLASSIC_PAGES, feedRequest, yearsAgo, feedMediaType, buildDeck, choicesFor, matches, onlyWants, watchedList, myList, isMatch, partnerNote, STARTER, hue,
 } from "../../lib.js";
 
 const title = (id, name, extra = {}) => ({ id, key: `movie:${id}`, media_type: "movie", title: name, created_at: "2026-10-01", ...extra });
@@ -83,8 +84,39 @@ describe("titleKey / fromTmdb / posterUrl", () => {
     assert.equal(feedMediaType("movie/top_rated"), "movie");
     assert.equal(feedMediaType("trending/tv/week"), "tv");
     assert.equal(feedMediaType("trending/all/week"), undefined);
-    for (const f of FEEDS.movie) assert.equal(feedMediaType(f), "movie", f);
-    for (const f of FEEDS.tv) assert.equal(feedMediaType(f), "tv", f);
+    assert.equal(feedMediaType("discover/movie"), "movie");
+    assert.equal(feedMediaType("discover/tv"), "tv");
+    for (const f of [...FEEDS.movie.recent, ...FEEDS.movie.classic]) assert.equal(feedMediaType(f), "movie", f);
+    for (const f of [...FEEDS.tv.recent, ...FEEDS.tv.classic]) assert.equal(feedMediaType(f), "tv", f);
+  });
+});
+
+describe("feedRequest", () => {
+  const today = new Date(2026, 9, 21);
+  test("yearsAgo", () => {
+    assert.equal(yearsAgo(today, 2), "2024-10-21");
+    assert.equal(yearsAgo(new Date(2028, 1, 29), 1), "2027-03-01");
+  });
+  test("recent lists first, cycling page by page", () => {
+    const first = [0, 1, 2, 3].map((n) => feedRequest("all", n, today));
+    assert.deepEqual(first.map((r) => `${r.path}@${r.params.page}`), ["trending/all/week@1", "discover/movie@1", "discover/tv@1", "trending/all/week@2"]);
+    assert.equal(first[1].params["primary_release_date.gte"], "2024-10-21");
+    assert.equal(first[2].params["first_air_date.gte"], "2024-10-21");
+    assert.equal(first[1].params.sort_by, "popularity.desc");
+  });
+  test("then the all-time lists, then done", () => {
+    const n = FEEDS.all.recent.length * RECENT_PAGES;
+    assert.equal(feedRequest("all", n - 1, today).params.page, RECENT_PAGES);
+    assert.deepEqual(feedRequest("all", n, today), { path: "movie/top_rated", params: { page: 1 } });
+    const end = n + FEEDS.all.classic.length * CLASSIC_PAGES;
+    assert.ok(feedRequest("all", end - 1, today));
+    assert.equal(feedRequest("all", end, today), null);
+  });
+  test("filters only ask for their media type", () => {
+    for (let n = 0; feedRequest("movie", n, today); n++) {
+      assert.equal(feedMediaType(feedRequest("movie", n, today).path), "movie");
+    }
+    for (let n = 0; feedRequest("tv", n, today); n++) assert.equal(feedMediaType(feedRequest("tv", n, today).path), "tv");
   });
 });
 
@@ -158,11 +190,62 @@ describe("matches / onlyWants / watched / myList", () => {
   });
 });
 
+describe("details", () => {
+  test("movie details: runtime, genres, imdb id, top cast", () => {
+    const cast = Array.from({ length: 10 }, (_, k) => ({ id: k, name: `A${k}`, character: k ? `R${k}` : "", profile_path: `/f${k}.jpg` }));
+    const d = detailsFromTmdb({ runtime: 148, imdb_id: "tt1", genres: [{ name: "A" }, { name: "B" }, { name: "C" }, { name: "D" }], credits: { cast }, overview: "", poster_path: "/p.jpg" }, "movie");
+    assert.equal(d.length, "2h 28m");
+    assert.deepEqual(d.genres, ["A", "B", "C"]);
+    assert.equal(d.imdbId, "tt1");
+    assert.equal(d.cast.length, CAST_LIMIT);
+    assert.deepEqual(d.cast[0], { id: 0, name: "A0", character: null, face: "/f0.jpg" });
+    assert.equal(d.overview, null);
+  });
+  test("tv details: seasons and imdb id from external_ids", () => {
+    const d = detailsFromTmdb({ number_of_seasons: 1, external_ids: { imdb_id: "tt2" } }, "tv");
+    assert.equal(d.length, "1 season");
+    assert.equal(d.imdbId, "tt2");
+    assert.deepEqual(d.cast, []);
+    assert.equal(detailsFromTmdb({ number_of_seasons: 4 }, "tv").length, "4 seasons");
+  });
+  test("runtime text", () => {
+    assert.equal(runtimeText(120), "2h");
+    assert.equal(runtimeText(45), "45m");
+    assert.equal(runtimeText(null), null);
+  });
+  test("imdb rating ignores N/A and junk", () => {
+    assert.equal(imdbRating({ imdbRating: "8.8" }), "8.8");
+    assert.equal(imdbRating({ imdbRating: "N/A" }), null);
+    assert.equal(imdbRating(null), null);
+  });
+  test("face url", () => {
+    assert.equal(faceUrl("/x.jpg"), "https://image.tmdb.org/t/p/w185/x.jpg");
+    assert.equal(faceUrl(null), null);
+  });
+  test("latest work: newest first, undated last, no self appearances or duplicates", () => {
+    const w = latestWork({ cast: [
+      { id: 1, media_type: "movie", title: "Old", release_date: "2010-01-01", character: "A" },
+      { id: 2, media_type: "tv", name: "Chat", first_air_date: "2025-01-01", character: "Himself" },
+      { id: 3, media_type: "tv", name: "News", first_air_date: "2025-01-01", character: "Guest", genre_ids: [10763] },
+      { id: 4, media_type: "movie", title: "New", release_date: "2026-01-01", character: "" },
+      { id: 4, media_type: "movie", title: "New", release_date: "2026-01-01", character: "B" },
+      { id: 5, media_type: "movie", title: "Undated" },
+    ] });
+    assert.deepEqual(w.map((x) => x.t.title), ["New", "Old", "Undated"]);
+    assert.equal(w[0].character, null);
+    assert.equal(latestWork({ cast: [] }).length, 0);
+    assert.equal(latestWork({}).length, 0);
+  });
+});
+
 describe("STARTER / hue", () => {
   test("starter titles have unique custom keys and both media types", () => {
     assert.equal(new Set(STARTER.map((t) => t.key)).size, STARTER.length);
     assert.ok(STARTER.every((t) => t.key.startsWith("custom:")));
     assert.ok(STARTER.some((t) => t.media_type === "tv") && STARTER.some((t) => t.media_type === "movie"));
+  });
+  test("starter list is newest first", () => {
+    assert.deepEqual(STARTER.map((t) => t.year), STARTER.map((t) => t.year).sort((a, b) => b - a));
   });
   test("hue is stable and in range", () => {
     assert.equal(hue("Inception"), hue("Inception"));
