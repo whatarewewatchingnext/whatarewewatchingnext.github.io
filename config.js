@@ -11,7 +11,7 @@ export const USERNAME_EMAIL_DOMAIN = "users.whatarewewatchingnext.app";
 // Free TMDB "API Key" (v3) from https://www.themoviedb.org/settings/api, for posters,
 // trending titles and search. Leave empty to use a small built-in list instead.
 // It ships to every browser, so it is a read-only key, but treat it as semi-public.
-export const TMDB_KEY = "";
+export const TMDB_KEY = "223b20b4ec7919f5ddf531460b8393eb";
 
 // Optional: ISO 3166 country for "now playing" and TMDB results (e.g. "IN", "US").
 export const TMDB_REGION = "";
