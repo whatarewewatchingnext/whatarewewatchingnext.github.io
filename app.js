@@ -125,7 +125,7 @@ function showMain() {
 
   // Media (All / Movies / Shows) and genre combine into one filter, e.g. "movie|comedy".
   const genreSel = $("#genre");
-  genreSel.innerHTML = `<option value="">Genre</option>` + Object.entries(GENRES).map(([k, g]) => `<option value="${k}">${esc(g.label)}</option>`).join("");
+  genreSel.innerHTML = `<option value="">All genres</option>` + Object.entries(GENRES).map(([k, g]) => `<option value="${k}">${esc(g.label)}</option>`).join("");
   genreSel.hidden = !TMDB_KEY;
   try { genreSel.value = localStorage.getItem("genre") ?? ""; } catch {}
   if (!GENRES[genreSel.value]) genreSel.value = "";

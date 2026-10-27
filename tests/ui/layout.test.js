@@ -114,11 +114,13 @@ for (const [name, width, height] of SIZES) {
         const bar = await page.evaluate(() => {
           const r = (s) => document.querySelector(s).getBoundingClientRect();
           const seg = r("#filter"), genre = r("#genre"), find = r("#open-search");
-          return { genreW: genre.width, overlap: seg.right > genre.left + 1 || genre.right > find.left + 1, tabsFit: [...document.querySelectorAll("#filter button")].every((b) => b.scrollWidth <= b.clientWidth + 1) };
+          return { heights: [seg.height, genre.height, find.height].map(Math.round), genreLabel: document.querySelector("#genre").selectedOptions[0].textContent, genreW: genre.width, overlap: seg.right > genre.left + 1 || genre.right > find.left + 1, tabsFit: [...document.querySelectorAll("#filter button")].every((b) => b.scrollWidth <= b.clientWidth + 1) };
         });
         assert.ok(bar.genreW >= 72, `genre dropdown squeezed to ${bar.genreW}px`);
         assert.equal(bar.overlap, false, "deck bar items overlap");
         assert.equal(bar.tabsFit, true, "All/Movies/Shows labels cut off");
+        assert.ok(Math.max(...bar.heights) - Math.min(...bar.heights) <= 1, `deck bar controls differ in height: ${bar.heights}`);
+        assert.equal(bar.genreLabel, "All genres");
         const m = await page.evaluate(() => {
           const q = (s) => document.querySelector(s)?.getBoundingClientRect();
           const faces = [...document.querySelectorAll("#deck .mcard.top .face")].map((f) => f.getBoundingClientRect()).filter((b) => b.height);
