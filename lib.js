@@ -68,6 +68,7 @@ export function detailsFromTmdb(d, mediaType) {
   return {
     length,
     genres: (d.genres ?? []).map((g) => g.name).slice(0, 3),
+    genreIds: (d.genres ?? []).map((g) => g.id).filter(Number.isInteger),
     imdbId: d.imdb_id ?? d.external_ids?.imdb_id ?? null,
     cast: (d.credits?.cast ?? []).slice(0, CAST_LIMIT).map((c) => ({ id: c.id, name: c.name, character: c.character || null, face: c.profile_path ?? null })),
     overview: d.overview || null,

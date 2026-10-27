@@ -42,6 +42,7 @@ you can regenerate it on TMDB.
 
 1. Create a free project at [supabase.com](https://supabase.com).
 2. **SQL Editor → New query**, paste all of `supabase/schema.sql`, then click **Run**.
+   (A database set up before genres were stored only needs `supabase/migrations/002_title_genres.sql`.)
 3. **Authentication → Sign In / Providers → Email**: turn **off** “Confirm email”. Usernames are mapped
    to pseudo-emails, so no mail can be delivered.
 4. **Project Settings**: copy the **Project URL** (Data API) and the **publishable** key (API Keys) into `config.js`.

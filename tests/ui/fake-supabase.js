@@ -32,9 +32,9 @@ function ensureTitle(p) {
   const title = clean(p.title);
   if (!title) throw err("23514", "title required");
   let t = db.titles.find((x) => x.household_id === myHousehold() && x.key === p.key);
-  if (t) { t.poster ??= p.poster ?? null; t.overview ??= p.overview ?? null; t.rating ??= p.rating ?? null; return t; }
+  if (t) { t.poster ??= p.poster ?? null; t.overview ??= p.overview ?? null; t.rating ??= p.rating ?? null; t.genre_ids ??= p.genre_ids ?? null; return t; }
   t = { id: uid("title"), household_id: myHousehold(), key: p.key, media_type: p.media_type ?? "movie", tmdb_id: p.tmdb_id ?? null,
-    title, year: p.year ?? null, poster: p.poster ?? null, overview: p.overview ?? null, rating: p.rating ?? null,
+    title, year: p.year ?? null, poster: p.poster ?? null, overview: p.overview ?? null, rating: p.rating ?? null, genre_ids: p.genre_ids ?? null,
     added_by: sessionUserId, created_at: now() };
   db.titles.push(t);
   return t;

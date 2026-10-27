@@ -217,6 +217,38 @@ async function loadData() {
   noticeMatches();
   renderAll();
   refreshRecs();
+  backfillGenres();
+}
+
+// Titles saved before genres were stored get them from TMDB, a few per load, so the
+// genre filter can find them. Stops for the session if the database refuses.
+const BACKFILL_BATCH = 8;
+let backfill = { busy: false, failed: false, tried: new Set() };
+
+async function backfillGenres() {
+  if (!TMDB_KEY || backfill.busy || backfill.failed) return;
+  const todo = state.titles.filter((t) => t.tmdb_id && !t.genre_ids && !backfill.tried.has(t.id)).slice(0, BACKFILL_BATCH);
+  if (!todo.length) return;
+  backfill.busy = true;
+  let changed = false;
+  try {
+    for (const t of todo) {
+      backfill.tried.add(t.id);
+      try {
+        const d = await tmdbGet(`${t.media_type}/${t.tmdb_id}`);
+        const genre_ids = (d.genres ?? []).map((g) => g.id).filter(Number.isInteger);
+        const { error } = await sb.from("titles").update({ genre_ids }).eq("id", t.id);
+        if (error) { console.warn("genre backfill:", error.message); backfill.failed = true; break; }
+        t.genre_ids = genre_ids;
+        changed = true;
+      } catch (e) {
+        console.warn("genre backfill:", e.message);
+      }
+    }
+  } finally {
+    backfill.busy = false;
+  }
+  if (changed) { renderDeck(); backfillGenres(); }
 }
 
 // ------------------------------------------------- "For you two" recs ----
@@ -581,6 +613,7 @@ async function commit(item, choice) {
 const titlePayload = (t) => ({
   key: t.key, media_type: t.media_type, tmdb_id: t.tmdb_id ?? null, title: t.title,
   year: t.year ?? null, poster: t.poster ?? null, overview: t.overview ?? null, rating: t.rating ?? null,
+  genre_ids: t.genre_ids ?? null,
 });
 
 async function undo() {

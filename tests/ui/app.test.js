@@ -472,9 +472,9 @@ describe("genre dropdown", () => {
     assert.equal(await page.inputValue("#genre"), "");
     assert.ok((await texts(page, "#genre option")).includes("Comedy"));
     await page.selectOption("#genre", "comedy");
-    await page.waitForFunction(() => /\[g35\]/.test(document.querySelector("#deck .mcard.top h2")?.textContent ?? ""));
+    await page.waitForFunction(() => /\[g35\]|^Inception$/.test(document.querySelector("#deck .mcard.top h2")?.textContent ?? ""));
     for (let i = 0; i < 5; i++) {
-      assert.match(await topTitle(page), /\[g35\]/, "only comedies");
+      assert.match(await topTitle(page), /\[g35\]|^Inception$/, "only comedies (Inception's genres include comedy once filled in)");
       await page.click("[data-swipe=no]");
       await settle(page);
     }
@@ -483,15 +483,43 @@ describe("genre dropdown", () => {
     assert.equal(await page.getAttribute("#genre", "class"), "on", "highlighted while a genre is on");
 
     await page.click("[data-filter=movie]");
-    await page.waitForFunction(() => /^Film/.test(document.querySelector("#deck .mcard.top h2")?.textContent ?? ""));
-    assert.match(await topTitle(page), /\[g35\]/, "movies + comedy together");
+    await page.waitForFunction(() => /^Film.*\[g35\]|^Inception$/.test(document.querySelector("#deck .mcard.top h2")?.textContent ?? ""), null, { timeout: 5000 });
+    assert.equal(await page.textContent("#deck .mcard.top .meta").then((m) => /Movie/.test(m)), true, "movies + comedy together");
 
     await page.reload();
     await page.waitForSelector("#deck .mcard.top");
     assert.equal(await page.inputValue("#genre"), "comedy", "remembered on this phone");
-    await page.waitForFunction(() => /\[g35\]/.test(document.querySelector("#deck .mcard.top h2")?.textContent ?? ""));
+    await page.waitForFunction(() => /\[g35\]|^Inception$/.test(document.querySelector("#deck .mcard.top h2")?.textContent ?? ""), null, { timeout: 5000 });
 
     await page.selectOption("#genre", "");
+    await page.waitForFunction(() => !/\[g/.test(document.querySelector("#deck .mcard.top h2")?.textContent ?? "[g"), null, { timeout: 5000 });
+    assert.equal(await page.getAttribute("#genre", "class"), "", "no longer highlighted");
+  }));
+
+  test("genres are saved with swipes, so household titles show under their genre", () => {
+    const seed = baseSeed();
+    seed.titles.push({ id: "t2", household_id: "h1", key: "tv:1", media_type: "tv", tmdb_id: 1, title: "Partner Comedy", genre_ids: [35], created_at: "2026-09-01" });
+    seed.swipes.push({ title_id: "t2", user_id: "u2", household_id: "h1", choice: "yes", updated_at: "2026-10-01" });
+    return withApp(seed, async ({ page, db }) => {
+      await page.selectOption("#genre", "comedy");
+      await page.waitForFunction(() => document.querySelector("#deck .mcard.top h2")?.textContent === "Partner Comedy");
+      assert.equal(await page.textContent("#deck .mcard.top .note"), "💕 wife wants to watch", "partner's pick stays first under a genre");
+      for (let i = 0; i < 4; i++) {
+        await page.click("[data-swipe=yes]");
+        await settle(page);
+      }
+      const feedTitle = (await db()).titles.find((t) => /\[g35\]/.test(t.title));
+      assert.ok(feedTitle, "swiped a feed comedy");
+      assert.deepEqual(feedTitle.genre_ids, [35], "a feed title's genres are stored with the swipe");
+    });
+  });
+
+  test("titles saved before genres existed get them filled in", () => withApp(baseSeed(), async ({ page, db, tmdbCalls }) => {
+    await page.waitForFunction(async () => (window.__fake.db.titles.find((t) => t.id === "t1")?.genre_ids ?? null) !== null);
+    assert.deepEqual((await db()).titles.find((t) => t.id === "t1").genre_ids, [18, 35, 80, 9]);
+    assert.ok(tmdbCalls.some((c) => c.startsWith("movie/27205?")));
+    assert.ok(!(await db()).titles.find((t) => t.id === "tx").genre_ids, "another household's titles are untouched");
+    await page.selectOption("#genre", "crime");
     await page.waitForFunction(() => document.querySelector("#deck .mcard.top h2")?.textContent === "Inception");
   }));
 
