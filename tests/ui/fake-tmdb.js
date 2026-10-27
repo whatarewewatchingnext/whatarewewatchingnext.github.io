@@ -36,9 +36,14 @@ export function tmdbResponse(url) {
     const id = 100000 + li * 1000 + page * 10 + k;
     const mt = path === "trending/all/week" ? (k === 2 ? "tv" : "movie") : tv ? "tv" : "movie";
     const name = `${mt === "tv" ? "Show" : "Film"} ${li}-${page}-${k}`;
+    // k=0 is a comedy, the rest dramas; asking for a genre gets only that genre (like TMDB).
+    const genre_ids = k === 0 ? [35] : [18];
     return mt === "tv"
-      ? { id, media_type: mt, name, first_air_date: "2020-01-01", poster_path: null, overview: `About ${name}`, vote_average: 7.5, vote_count: 500 }
-      : { id, media_type: mt, title: name, release_date: "2021-05-05", poster_path: `/p${id}.jpg`, overview: `About ${name}`, vote_average: 7.1, vote_count: 900 };
+      ? { id, media_type: mt, name, first_air_date: "2020-01-01", poster_path: null, overview: `About ${name}`, vote_average: 7.5, vote_count: 500, genre_ids }
+      : { id, media_type: mt, title: name, release_date: "2021-05-05", poster_path: `/p${id}.jpg`, overview: `About ${name}`, vote_average: 7.1, vote_count: 900, genre_ids };
+  }).map((r) => {
+    const want = url.searchParams.get("with_genres");
+    return want ? { ...r, id: r.id + 50000, genre_ids: want.split("|").map(Number), ...(r.title ? { title: `${r.title} [g${want}]` } : { name: `${r.name} [g${want}]` }) } : r;
   });
   // One Japanese title per trending page, which the language filter should drop.
   if (path === "trending/all/week") results.push({ id: 100000 + page * 10 + 9, media_type: "tv", name: `Anime ${page}`, original_language: "ja", first_air_date: "2023-10-22", vote_average: 8.7, vote_count: 900 });

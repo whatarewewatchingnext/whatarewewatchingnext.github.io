@@ -111,6 +111,14 @@ for (const [name, width, height] of SIZES) {
         assert.deepEqual(await page.evaluate(sliced, "#deck .mcard.top .facts"), [], "title block");
         assert.deepEqual(await page.evaluate(sliced, "#deck .mcard.top .body"), [], "card body");
         assert.deepEqual(await page.evaluate(sideways), [], "sideways");
+        const bar = await page.evaluate(() => {
+          const r = (s) => document.querySelector(s).getBoundingClientRect();
+          const seg = r("#filter"), genre = r("#genre"), find = r("#open-search");
+          return { genreW: genre.width, overlap: seg.right > genre.left + 1 || genre.right > find.left + 1, tabsFit: [...document.querySelectorAll("#filter button")].every((b) => b.scrollWidth <= b.clientWidth + 1) };
+        });
+        assert.ok(bar.genreW >= 72, `genre dropdown squeezed to ${bar.genreW}px`);
+        assert.equal(bar.overlap, false, "deck bar items overlap");
+        assert.equal(bar.tabsFit, true, "All/Movies/Shows labels cut off");
         const m = await page.evaluate(() => {
           const q = (s) => document.querySelector(s)?.getBoundingClientRect();
           const faces = [...document.querySelectorAll("#deck .mcard.top .face")].map((f) => f.getBoundingClientRect()).filter((b) => b.height);

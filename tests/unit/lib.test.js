@@ -5,6 +5,7 @@ import {
   recSeeds, recommend, becauseText, favouriteActors, quality, seededRandom, daySeed, keyedNoise, RECENT_SEEDS, SAMPLE_SEEDS,
   detailsFromTmdb, runtimeText, imdbRating, latestWork, faceUrl, CAST_LIMIT,
   similarity, searchVariants, rankSearch, CLOSE_ENOUGH,
+  GENRES, parseFilter, filterKey, matchesFilter,
   inLanguages, FEEDS, RECENT_PAGES, CLASSIC_PAGES, feedRequest, yearsAgo, feedMediaType, buildDeck, choicesFor, matches, onlyWants, watchedList, myList, isMatch, partnerNote, STARTER, hue,
 } from "../../lib.js";
 
@@ -59,7 +60,7 @@ describe("titleKey / fromTmdb / posterUrl", () => {
   });
   test("maps a movie result", () => {
     assert.deepEqual(fromTmdb({ id: 1, title: "Up", release_date: "2009-05-29", poster_path: "/up.jpg", overview: "Balloons", vote_average: 8.03, vote_count: 100 }, "movie"), {
-      key: "movie:1", media_type: "movie", tmdb_id: 1, title: "Up", year: 2009, poster: "/up.jpg", overview: "Balloons", rating: 8, lang: null,
+      key: "movie:1", media_type: "movie", tmdb_id: 1, title: "Up", year: 2009, poster: "/up.jpg", overview: "Balloons", rating: 8, lang: null, genre_ids: null,
     });
   });
   test("maps a tv result using media_type from the result", () => {
@@ -90,6 +91,47 @@ describe("titleKey / fromTmdb / posterUrl", () => {
     assert.equal(feedMediaType("discover/tv"), "tv");
     for (const f of [...FEEDS.movie.recent, ...FEEDS.movie.classic]) assert.equal(feedMediaType(f), "movie", f);
     for (const f of [...FEEDS.tv.recent, ...FEEDS.tv.classic]) assert.equal(feedMediaType(f), "tv", f);
+  });
+});
+
+describe("genres", () => {
+  const today = new Date(2026, 9, 21);
+  test("filter strings", () => {
+    assert.deepEqual(parseFilter("all"), { media: "all", genre: "" });
+    assert.deepEqual(parseFilter("movie|comedy"), { media: "movie", genre: "comedy" });
+    assert.deepEqual(parseFilter("tv|nonsense"), { media: "tv", genre: "" }, "unknown genre is ignored");
+    assert.equal(filterKey("all", ""), "all");
+    assert.equal(filterKey("tv", "crime"), "tv|crime");
+  });
+  test("matching uses each kind's own genre ids", () => {
+    const tvAction = { media_type: "tv", genre_ids: [10759] }, movieAction = { media_type: "movie", genre_ids: [28, 18] };
+    assert.ok(matchesFilter(tvAction, "all|action"));
+    assert.ok(matchesFilter(movieAction, "all|action"));
+    assert.ok(!matchesFilter(movieAction, "tv|action"), "media still applies");
+    assert.ok(!matchesFilter({ media_type: "movie", genre_ids: [10759] }, "all|action"), "a TV id doesn't count for a movie");
+    assert.ok(!matchesFilter({ media_type: "tv", genre_ids: null }, "all|comedy"), "no genre info → not shown under a genre");
+    assert.ok(matchesFilter({ media_type: "tv", genre_ids: null }, "tv"), "but fine without a genre");
+  });
+  test("genre feeds: discover with the genre, recent first, then best-rated, in English/Hindi", () => {
+    const r0 = feedRequest("all|comedy", 0, today, ["en", "hi"]), r1 = feedRequest("all|comedy", 1, today, ["en", "hi"]);
+    assert.equal(r0.path, "discover/movie");
+    assert.equal(r1.path, "discover/tv");
+    assert.equal(r0.params.with_genres, "35");
+    assert.equal(r0.params["primary_release_date.gte"], "2024-10-21");
+    assert.equal(r1.params["first_air_date.gte"], "2024-10-21");
+    assert.equal(r0.params.with_original_language, "en|hi");
+    const classic = feedRequest("all|comedy", 2 * RECENT_PAGES, today);
+    assert.equal(classic.params.sort_by, "vote_average.desc");
+    assert.equal(classic.params["primary_release_date.gte"], undefined);
+    assert.equal(feedRequest("all|comedy", 2 * (RECENT_PAGES + CLASSIC_PAGES), today), null);
+    assert.equal(feedRequest("movie|action", 0, today).params.with_genres, "28|12", "either genre counts");
+  });
+  test("genres TV doesn't have: only movies, and none for Shows", () => {
+    for (let n = 0; n < 5; n++) assert.equal(feedRequest("all|romance", n, today).path, "discover/movie");
+    assert.equal(feedRequest("tv|horror", 0, today), null);
+  });
+  test("every genre has a label and ids for at least one kind", () => {
+    for (const [k, g] of Object.entries(GENRES)) assert.ok(g.label && (g.movie.length || g.tv.length), k);
   });
 });
 

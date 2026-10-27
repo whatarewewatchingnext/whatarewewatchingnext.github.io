@@ -49,6 +49,7 @@ export function fromTmdb(r, mediaType = r.media_type) {
     overview: r.overview || null,
     rating: typeof r.vote_average === "number" && r.vote_count > 20 ? Math.round(r.vote_average * 10) / 10 : null,
     lang: r.original_language ?? null,
+    genre_ids: Array.isArray(r.genre_ids) ? r.genre_ids : null,
   };
 }
 
@@ -130,10 +131,53 @@ export function yearsAgo(today, n) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+// Genres for the dropdown. TMDB numbers movie and TV genres differently (and TV has no
+// Romance or Horror), so each has its own ids; an empty list means "none of that kind".
+export const GENRES = {
+  action:      { label: "Action", movie: [28, 12], tv: [10759] },
+  comedy:      { label: "Comedy", movie: [35], tv: [35] },
+  drama:       { label: "Drama", movie: [18], tv: [18] },
+  crime:       { label: "Crime", movie: [80], tv: [80] },
+  thriller:    { label: "Thriller", movie: [53, 9648], tv: [9648] },
+  romance:     { label: "Romance", movie: [10749], tv: [] },
+  scifi:       { label: "Sci-Fi", movie: [878, 14], tv: [10765] },
+  horror:      { label: "Horror", movie: [27], tv: [] },
+  family:      { label: "Family", movie: [10751, 16], tv: [10751, 16] },
+  documentary: { label: "Docs", movie: [99], tv: [99] },
+  history:     { label: "History", movie: [36, 10752], tv: [10768] },
+};
+
+// A filter is "all", "movie" or "tv", optionally with a genre: "movie|comedy".
+export function parseFilter(filter) {
+  const [media = "all", genre = ""] = String(filter).split("|");
+  return { media, genre: GENRES[genre] ? genre : "" };
+}
+export const filterKey = (media, genre) => (genre ? `${media}|${genre}` : media);
+
+// With a genre, every request is a "discover" query for it: recent popular ones first,
+// then the best-rated of all time. Kinds with no ids for the genre (TV romance) are skipped.
+function genreRequest(media, genre, n, since, langs) {
+  const kinds = (media === "all" ? ["movie", "tv"] : [media]).filter((k) => GENRES[genre][k].length);
+  if (!kinds.length) return null;
+  const lang = langs.length ? { with_original_language: langs.join("|") } : {};
+  const recentN = kinds.length * RECENT_PAGES;
+  const k = kinds[n % kinds.length];
+  const base = { with_genres: GENRES[genre][k].join("|"), ...lang };
+  if (n < recentN) {
+    const date = k === "movie" ? { "primary_release_date.gte": since } : { "first_air_date.gte": since };
+    return { path: `discover/${k}`, params: { ...base, ...date, sort_by: "popularity.desc", "vote_count.gte": k === "movie" ? "50" : "20", page: Math.floor(n / kinds.length) + 1 } };
+  }
+  const m = n - recentN;
+  if (m >= kinds.length * CLASSIC_PAGES) return null;
+  return { path: `discover/${k}`, params: { ...base, sort_by: "vote_average.desc", "vote_count.gte": k === "movie" ? "500" : "150", page: Math.floor(m / kinds.length) + 1 } };
+}
+
 // The n-th request to make for a filter: { path, params } with the page number, or null when done.
 export function feedRequest(filter, n, today = new Date(), langs = []) {
-  const { recent, classic } = FEEDS[filter];
+  const { media, genre } = parseFilter(filter);
   const since = yearsAgo(today, RECENT_YEARS);
+  if (genre) return genreRequest(media, genre, n, since, langs);
+  const { recent, classic } = FEEDS[media];
   if (n < recent.length * RECENT_PAGES) {
     const path = recent[n % recent.length];
     return { path, params: { ...recentParams(path, since, langs), page: Math.floor(n / recent.length) + 1 } };
@@ -143,7 +187,14 @@ export function feedRequest(filter, n, today = new Date(), langs = []) {
   return { path: classic[m % classic.length], params: { page: Math.floor(m / classic.length) + 1 } };
 }
 
-export const matchesFilter = (t, filter) => filter === "all" || t.media_type === filter;
+// Without genre info (hand-added or older household titles) a title can't match a genre.
+export function matchesFilter(t, filter) {
+  const { media, genre } = parseFilter(filter);
+  if (media !== "all" && t.media_type !== media) return false;
+  if (!genre) return true;
+  const ids = GENRES[genre][t.media_type] ?? [];
+  return !!t.genre_ids?.some((g) => ids.includes(g));
+}
 
 // What I see next, in order:
 //   1. titles my partner wants to watch that I haven't swiped yet

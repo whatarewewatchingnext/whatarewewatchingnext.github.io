@@ -467,6 +467,45 @@ describe("search", () => {
   }));
 });
 
+describe("genre dropdown", () => {
+  test("a genre fills the deck with only that genre, and it's remembered", () => withApp(baseSeed(), async ({ page, tmdbCalls }) => {
+    assert.equal(await page.inputValue("#genre"), "");
+    assert.ok((await texts(page, "#genre option")).includes("Comedy"));
+    await page.selectOption("#genre", "comedy");
+    await page.waitForFunction(() => /\[g35\]/.test(document.querySelector("#deck .mcard.top h2")?.textContent ?? ""));
+    for (let i = 0; i < 5; i++) {
+      assert.match(await topTitle(page), /\[g35\]/, "only comedies");
+      await page.click("[data-swipe=no]");
+      await settle(page);
+    }
+    assert.ok(tmdbCalls.some((c) => c.startsWith("discover/movie") && c.includes("with_genres=35")));
+    assert.ok(tmdbCalls.some((c) => c.startsWith("discover/tv") && c.includes("with_genres=35")));
+    assert.equal(await page.getAttribute("#genre", "class"), "on", "highlighted while a genre is on");
+
+    await page.click("[data-filter=movie]");
+    await page.waitForFunction(() => /^Film/.test(document.querySelector("#deck .mcard.top h2")?.textContent ?? ""));
+    assert.match(await topTitle(page), /\[g35\]/, "movies + comedy together");
+
+    await page.reload();
+    await page.waitForSelector("#deck .mcard.top");
+    assert.equal(await page.inputValue("#genre"), "comedy", "remembered on this phone");
+    await page.waitForFunction(() => /\[g35\]/.test(document.querySelector("#deck .mcard.top h2")?.textContent ?? ""));
+
+    await page.selectOption("#genre", "");
+    await page.waitForFunction(() => document.querySelector("#deck .mcard.top h2")?.textContent === "Inception");
+  }));
+
+  test("a genre with no shows says so instead of loading forever", () => withApp(baseSeed(), async ({ page }) => {
+    await page.click("[data-filter=tv]");
+    await page.selectOption("#genre", "horror");
+    await page.waitForSelector("#deck .empty:has-text('horror shows')");
+  }));
+
+  test("no TMDB key: no genre dropdown", () => withApp(baseSeed(), async ({ page }) => {
+    assert.equal(await page.isVisible("#genre"), false);
+  }, { tmdb: false }));
+});
+
 describe("fuzzy search", () => {
   test("typos still find the title, closest first", () => withApp(baseSeed(), async ({ page, tmdbCalls }) => {
     await page.click("#open-search");

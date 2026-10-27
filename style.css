@@ -142,7 +142,24 @@ body.swiping main { padding-bottom: 0; }
   min-height: 420px;
 }
 .deck-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-#open-search { min-height: 40px; padding: 6px 12px; font-size: .9rem; }
+.deck-bar .seg { flex: 0 0 auto; }
+#genre {
+  flex: 1 1 auto; min-width: 0; width: 100%; max-width: 220px; min-height: 40px; padding: 6px 8px; font-size: .9rem;
+  background: var(--chip); border-color: transparent; text-overflow: ellipsis;
+}
+#genre.on { background: var(--accent); color: var(--accent-text); font-weight: 600; }
+#open-search { flex: 0 0 auto; min-height: 40px; padding: 6px 12px; font-size: .9rem; }
+/* Narrow phones: tighter tabs, and Find as just the icon */
+@media (max-width: 400px) {
+  .deck-bar { gap: 6px; }
+  .deck-bar .seg button { padding: 6px 8px; font-size: .85rem; }
+  #open-search { font-size: 0; padding: 6px 10px; }
+  #open-search::first-letter { font-size: 1rem; }
+}
+@media (max-width: 340px) {
+  .deck-bar .seg button { padding: 6px 7px; font-size: .8rem; }
+  #genre { padding: 6px 4px; font-size: .85rem; }
+}
 .deck { position: relative; flex: 1; min-height: 0; container-type: size; }
 .deck .empty { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; padding: 24px; }
 .deck .empty .big { font-size: 3rem; }

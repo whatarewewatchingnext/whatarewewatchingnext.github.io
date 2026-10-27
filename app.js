@@ -4,7 +4,7 @@ import {
   CHOICES, esc, cleanName, mediaLabel, choiceFromDrag, dragProgress, titleKey, fromTmdb, posterUrl, faceUrl,
   detailsFromTmdb, imdbRating, latestWork, recSeeds, recommend, becauseText, inLanguages,
   favouriteActors, seededRandom, daySeed, keyedNoise, searchVariants, rankSearch, similarity, GOOD_MATCH,
-  feedRequest, feedMediaType, buildDeck, choicesFor, matches, onlyWants, watchedList, myList,
+  feedRequest, feedMediaType, buildDeck, GENRES, parseFilter, filterKey, choicesFor, matches, onlyWants, watchedList, myList,
   partnerNote, STARTER, hue,
 } from "./lib.js";
 
@@ -123,13 +123,29 @@ function showMain() {
 
   app.querySelectorAll(".bottom-nav button").forEach((b) => b.addEventListener("click", () => showView(b.dataset.view)));
 
+  // Media (All / Movies / Shows) and genre combine into one filter, e.g. "movie|comedy".
+  const genreSel = $("#genre");
+  genreSel.innerHTML = `<option value="">Genre</option>` + Object.entries(GENRES).map(([k, g]) => `<option value="${k}">${esc(g.label)}</option>`).join("");
+  genreSel.hidden = !TMDB_KEY;
+  try { genreSel.value = localStorage.getItem("genre") ?? ""; } catch {}
+  if (!GENRES[genreSel.value]) genreSel.value = "";
+  const setFilter = () => {
+    const media = $("#filter .active")?.dataset.filter ?? "all";
+    state.filter = filterKey(media, genreSel.value);
+    genreSel.classList.toggle("on", !!genreSel.value);
+    renderDeck();
+  };
   $("#filter").addEventListener("click", (e) => {
     const b = e.target.closest("[data-filter]");
     if (!b) return;
-    state.filter = b.dataset.filter;
     $("#filter").querySelectorAll("button").forEach((x) => x.classList.toggle("active", x === b));
-    renderDeck();
+    setFilter();
   });
+  genreSel.addEventListener("change", () => {
+    try { localStorage.setItem("genre", genreSel.value); } catch {}
+    setFilter();
+  });
+  if (genreSel.value) setFilter();
   $("#mine-tabs").addEventListener("click", (e) => {
     const b = e.target.closest("[data-choice]");
     if (!b) return;
@@ -387,7 +403,9 @@ async function renderDeck() {
   $("#undo").disabled = !state.undo.length;
   shown = { filter, keys: show.map((t) => t.key) };
   if (!show.length) {
-    el.innerHTML = `<div class="empty"><div class="big">🍿</div><p>You've swiped through everything${filter === "all" ? "" : ` in ${filter === "tv" ? "shows" : "movies"}`}.</p>
+    const { media, genre } = parseFilter(filter);
+    const what = [genre ? GENRES[genre].label.toLowerCase() : "", media === "all" ? "" : media === "tv" ? "shows" : "movies"].filter(Boolean).join(" ");
+    el.innerHTML = `<div class="empty"><div class="big">🍿</div><p>You've swiped through everything${what ? ` in ${esc(what)}` : ""}.</p>
        <p class="muted small">Try another filter, or tap 🔍 Find to add something.</p></div>`;
     return;
   }
