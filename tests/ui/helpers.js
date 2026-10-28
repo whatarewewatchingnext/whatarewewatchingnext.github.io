@@ -61,7 +61,7 @@ export async function stopAll() {
 }
 
 // Opens the app with the given seed. `tmdb: false` runs without a TMDB key.
-export async function openApp(seed = baseSeed(), { width = 375, height = 812, tmdb = true, omdb = true } = {}) {
+export async function openApp(seed = baseSeed(), { width = 375, height = 812, tmdb = true, omdb = true, latency = 0 } = {}) {
   const context = await browser.newContext({ viewport: { width, height }, timezoneId: "America/Los_Angeles", locale: "en-US", hasTouch: true });
   const page = await context.newPage();
   const errors = [];
@@ -73,8 +73,10 @@ export async function openApp(seed = baseSeed(), { width = 375, height = 812, tm
   await page.route(/^https?:\/\/(?!127\.0\.0\.1)/, (route) => route.abort());
   await page.route(/cdn\.jsdelivr\.net\/npm\/@supabase\/supabase-js/, async (route) =>
     route.fulfill({ contentType: "text/javascript", body: await readFile(FAKE, "utf8") }));
-  await page.route(/api\.themoviedb\.org\/3\//, (route) => {
+  const wait = () => new Promise((r) => setTimeout(r, latency * (0.5 + Math.random())));
+  await page.route(/api\.themoviedb\.org\/3\//, async (route) => {
     const url = new URL(route.request().url());
+    await wait();
     tmdbCalls.push(url.pathname.replace("/3/", "") + url.search);
     route.fulfill({ contentType: "application/json", body: JSON.stringify(tmdbResponse(url)) });
   });
@@ -94,7 +96,7 @@ export async function openApp(seed = baseSeed(), { width = 375, height = 812, tm
       .replace(/OMDB_KEY = ".*"/, `OMDB_KEY = "${omdb ? "fake-omdb-key" : ""}"`);
     route.fulfill({ contentType: "text/javascript", body });
   });
-  await page.addInitScript((s) => { window.__SEED = s; }, seed);
+  await page.addInitScript(([s, l]) => { window.__SEED = s; window.__LATENCY = l; }, [seed, latency]);
   await page.goto(baseUrl);
   return {
     page, errors, tmdbCalls,

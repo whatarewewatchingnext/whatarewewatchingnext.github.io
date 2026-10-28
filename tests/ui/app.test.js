@@ -305,6 +305,9 @@ describe("no flicker", () => {
   async function checkSteady(page, swipe) {
     for (let round = 0; round < 4; round++) {
       await page.waitForSelector("#deck .mcard:nth-last-child(2)");
+      // On a slow connection a card fills in once its details arrive; that's expected, so wait for it.
+      await page.waitForFunction(() => { const c = [...document.querySelectorAll("#deck .mcard")].at(-2); return c && c.dataset.sig !== "loading"; });
+      await page.waitForTimeout(300);
       const below = await page.evaluate(() => {
         const el = document.querySelectorAll("#deck .mcard")[document.querySelectorAll("#deck .mcard").length - 2];
         el.__marked = true;
@@ -326,6 +329,14 @@ describe("no flicker", () => {
   }
 
   test("after swiping with buttons", () => withApp(baseSeed(), ({ page }) => checkSteady(page, (p) => p.click("[data-swipe=no]"))));
+
+  test("on a slow connection, with likes reshaping the suggestions", () => {
+    const seed = baseSeed();
+    seed.swipes.push({ title_id: "t1", user_id: "u1", household_id: "h1", choice: "liked", updated_at: "2026-10-01" });
+    let i = 0;
+    const kinds = ["yes", "liked", "no", "disliked"];
+    return withApp(seed, ({ page }) => checkSteady(page, (p) => p.click(`[data-swipe=${kinds[i++ % 4]}]`)), { latency: 250 });
+  });
 
   test("while recommendations keep changing", () => {
     const seed = baseSeed();
@@ -366,6 +377,31 @@ describe("for you two", () => {
       await page.click("#shuffle");
       await settle(page);
       assert.ok((await texts(page, "#for-you .t")).length > 0, "shuffle keeps a list");
+    });
+  });
+
+  test("the next card stays put when a swipe changes the suggestions", () => {
+    const seed = baseSeed();
+    seed.swipes.push({ title_id: "t1", user_id: "u1", household_id: "h1", choice: "liked", updated_at: "2026-10-01" });
+    return withApp(seed, async ({ page, as }) => {
+      await page.waitForFunction(() => document.querySelector("#deck .mcard.top h2")?.textContent === "Interstellar");
+      await page.click("[data-swipe=no]");
+      await settle(page);
+      const next = await topTitle(page);
+      const note = await page.textContent("#deck .mcard.top .note");
+      assert.match(note, /Inception/, "the next card is a suggestion");
+      // Changing the like that produced it drops it from the suggestions...
+      await as("u1", async ({ rpc }) => rpc("swipe", { p_title: { key: "movie:27205", media_type: "movie", title: "Inception" }, p_choice: "disliked" }));
+      await settle(page);
+      await tab(page, "matches");
+      assert.ok(!(await texts(page, "#for-you .t")).includes(next), "no longer suggested");
+      await tab(page, "swipe");
+      // ...but the card you're looking at doesn't change under you.
+      assert.equal(await topTitle(page), next);
+      assert.equal(await page.textContent("#deck .mcard.top .note"), note);
+      await page.click("[data-swipe=no]");
+      await settle(page);
+      assert.notEqual(await topTitle(page), next);
     });
   });
 

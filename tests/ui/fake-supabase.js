@@ -26,6 +26,10 @@ const visible = (table, r) => {
   return true;
 };
 const CHOICES = ["no", "yes", "liked", "disliked"];
+// Optional network delay (openApp's latency option), randomised like a phone connection.
+const lag = () => new Promise((r) => setTimeout(r, (window.__LATENCY ?? 0) * (0.5 + Math.random())));
+// Like the real database, your own writes also come back as realtime events, a moment later.
+const echo = () => setTimeout(() => changeListeners.forEach((cb) => cb({})), (window.__LATENCY ?? 0) * 1.5);
 
 function ensureTitle(p) {
   if (!myHousehold()) throw err("42501", "not in a household");
@@ -104,7 +108,9 @@ function query(table) {
     limit(n) { limit = n; return c; },
     single() { single = true; return c; },
     maybeSingle() { single = true; maybe = true; return c; },
-    then(ok, bad) { return Promise.resolve(run()).then(ok, bad); },
+    then(ok, bad) {
+      return lag().then(() => { const r = run(); if (op !== "select" && !r.error) echo(); return r; }).then(ok, bad);
+    },
   };
   return c;
 }
@@ -115,6 +121,8 @@ const session = () => (me() ? { user: { id: me().id, email: me().email, user_met
 const emit = (event) => listeners.forEach((cb) => cb(event, session()));
 
 async function rpc(fn, args) {
+  await lag();
+  if (fn === "swipe" || fn === "ensure_title") echo();
   try {
     if (!sessionUserId) throw err("42501", "not signed in");
     if (fn === "ensure_title") return { data: ensureTitle(args.p).id, error: null };

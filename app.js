@@ -217,11 +217,17 @@ const memberIds = () => state.members.map((m) => m.user_id);
 const nameOf = (uid) => state.members.find((m) => m.user_id === uid)?.username ?? "someone";
 const others = () => state.members.filter((m) => m.user_id !== state.user.id);
 
+// Loads can overlap (a save, realtime updates); an older one that answers late is ignored,
+// so it can't briefly bring back a card you just swiped.
+let loadSeq = 0, loadedSeq = 0;
 async function loadData() {
+  const n = ++loadSeq;
   const [{ data: titles }, { data: swipes }] = await Promise.all([
     sb.from("titles").select("*").order("created_at"),
     sb.from("swipes").select("*"),
   ]);
+  if (n < loadedSeq) return;
+  loadedSeq = n;
   state.titles = titles ?? [];
   state.swipes = swipes ?? [];
   noticeMatches();
@@ -406,15 +412,16 @@ function ensureDetails(t) {
 }
 
 function currentDeck(filter = state.filter) {
+  const onScreen = swiping && shown.filter === filter ? shown : { keys: [], items: [] };
   // Recommendations go after anything from the household, before the general feed.
-  const feed = [...recs.map((r) => r.t), ...feedFor(filter).items];
+  // Cards on screen stay in even if new data drops them from the suggestions.
+  const feed = [...onScreen.items, ...recs.map((r) => r.t), ...feedFor(filter).items];
   const deck = buildDeck({ titles: state.titles, swipes: state.swipes, feed, userId: state.user.id, filter })
     .filter((t) => !state.pending.has(t.key));
   // Once you're swiping, cards already on screen keep their places, so new data (a save,
   // a partner's swipe, updated recommendations) never swaps out the card you're about to see.
   // Before the first swipe the deck is still loading, so recommendations may take the top.
-  const onScreen = swiping && shown.filter === filter ? shown.keys : [];
-  const at = (t) => { const i = onScreen.indexOf(t.key); return i < 0 ? Infinity : i; };
+  const at = (t) => { const i = onScreen.keys.indexOf(t.key); return i < 0 ? Infinity : i; };
   deck.sort((a, b) => at(a) - at(b));
   // Skipped cards go to the back for now; nothing is saved, so they're back next visit.
   const skipped = (t) => (state.skipped.has(t.key) ? 1 : 0);
@@ -428,7 +435,7 @@ function currentDeck(filter = state.filter) {
 
 let drag = null;      // the drag in progress, if any
 let flying = false;   // a card is animating off-screen
-let shown = { filter: null, keys: [] };   // cards on screen, top first
+let shown = { filter: null, keys: [], items: [], notes: new Map() };   // cards on screen, top first
 let swiping = false;                       // set by the first swipe this session
 
 async function renderDeck() {
@@ -438,7 +445,7 @@ async function renderDeck() {
   let deck = currentDeck(filter);
   const f = feedFor(filter);
   if (deck.length < DECK_MIN && !f.done) {
-    if (!deck.length) { el.innerHTML = `<div class="empty muted">Loading…</div>`; shown = { filter, keys: [] }; }
+    if (!deck.length) { el.innerHTML = `<div class="empty muted">Loading…</div>`; shown = { filter, keys: [], items: [], notes: new Map() }; }
     if (!f.loading) loadMore(filter).then(() => state.filter === filter && renderDeck());
     if (!deck.length) return;
   }
@@ -446,7 +453,10 @@ async function renderDeck() {
   const show = deck.slice(0, 3);
   show.forEach(ensureDetails);
   $("#undo").disabled = !state.undo.length;
-  shown = { filter, keys: show.map((t) => t.key) };
+  // A card keeps its note while it's on screen, even if the suggestion behind it goes away.
+  const noteFor = (t) => partnerNoteFor(t) || recReason.get(t.key) || (shown.filter === filter ? shown.notes.get(t.key) : "") || "";
+  const notes = new Map(show.map((t) => [t.key, noteFor(t)]));
+  shown = { filter, keys: show.map((t) => t.key), items: show, notes };
   if (!show.length) {
     const { media, genre } = parseFilter(filter);
     const what = [genre ? GENRES[genre].label.toLowerCase() : "", media === "all" ? "" : media === "tv" ? "shows" : "movies"].filter(Boolean).join(" ");
@@ -466,7 +476,7 @@ async function renderDeck() {
       c = tpl.content.firstElementChild;
       c.dataset.sig = sig;
     }
-    patchNote(c, partnerNoteFor(t) || recReason.get(t.key) || "");
+    patchNote(c, notes.get(t.key));
     c.style.setProperty("--i", i);
     c.classList.toggle("top", i === 0);
     if (i === 0) { c.tabIndex = 0; c.removeAttribute("aria-hidden"); c.setAttribute("aria-label", t.title); }
