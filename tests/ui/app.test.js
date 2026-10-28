@@ -37,6 +37,12 @@ async function dragTop(page, dx, dy) {
   await settle(page);
 }
 
+// Picks a genre in the dropdown and taps Go.
+async function pickGenre(page, genre) {
+  await page.selectOption("#genre", genre);
+  await page.click("#apply-genre");
+}
+
 describe("auth", () => {
   test("wrong password shows a friendly error", () => withApp(loggedOut(), async ({ page }) => {
     await page.fill("#auth-form [name=username]", "amey");
@@ -471,7 +477,7 @@ describe("genre dropdown", () => {
   test("a genre fills the deck with only that genre, and it's remembered", () => withApp(baseSeed(), async ({ page, tmdbCalls }) => {
     assert.equal(await page.inputValue("#genre"), "");
     assert.ok((await texts(page, "#genre option")).includes("Comedy"));
-    await page.selectOption("#genre", "comedy");
+    await pickGenre(page, "comedy");
     await page.waitForFunction(() => /\[g35\]|^Inception$/.test(document.querySelector("#deck .mcard.top h2")?.textContent ?? ""));
     for (let i = 0; i < 5; i++) {
       assert.match(await topTitle(page), /\[g35\]|^Inception$/, "only comedies (Inception's genres include comedy once filled in)");
@@ -491,7 +497,7 @@ describe("genre dropdown", () => {
     assert.equal(await page.inputValue("#genre"), "comedy", "remembered on this phone");
     await page.waitForFunction(() => /\[g35\]|^Inception$/.test(document.querySelector("#deck .mcard.top h2")?.textContent ?? ""), null, { timeout: 5000 });
 
-    await page.selectOption("#genre", "");
+    await pickGenre(page, "");
     await page.waitForFunction(() => !/\[g/.test(document.querySelector("#deck .mcard.top h2")?.textContent ?? "[g"), null, { timeout: 5000 });
     assert.equal(await page.getAttribute("#genre", "class"), "", "no longer highlighted");
   }));
@@ -501,7 +507,7 @@ describe("genre dropdown", () => {
     seed.titles.push({ id: "t2", household_id: "h1", key: "tv:1", media_type: "tv", tmdb_id: 1, title: "Partner Comedy", genre_ids: [35], created_at: "2026-09-01" });
     seed.swipes.push({ title_id: "t2", user_id: "u2", household_id: "h1", choice: "yes", updated_at: "2026-10-01" });
     return withApp(seed, async ({ page, db }) => {
-      await page.selectOption("#genre", "comedy");
+      await pickGenre(page, "comedy");
       await page.waitForFunction(() => document.querySelector("#deck .mcard.top h2")?.textContent === "Partner Comedy");
       assert.equal(await page.textContent("#deck .mcard.top .note"), "💕 wife wants to watch", "partner's pick stays first under a genre");
       for (let i = 0; i < 4; i++) {
@@ -519,19 +525,72 @@ describe("genre dropdown", () => {
     assert.deepEqual((await db()).titles.find((t) => t.id === "t1").genre_ids, [18, 35, 80, 9]);
     assert.ok(tmdbCalls.some((c) => c.startsWith("movie/27205?")));
     assert.ok(!(await db()).titles.find((t) => t.id === "tx").genre_ids, "another household's titles are untouched");
-    await page.selectOption("#genre", "crime");
+    await pickGenre(page, "crime");
     await page.waitForFunction(() => document.querySelector("#deck .mcard.top h2")?.textContent === "Inception");
   }));
 
   test("a genre with no shows says so instead of loading forever", () => withApp(baseSeed(), async ({ page }) => {
     await page.click("[data-filter=tv]");
-    await page.selectOption("#genre", "horror");
+    await pickGenre(page, "horror");
     await page.waitForSelector("#deck .empty:has-text('horror shows')");
   }));
 
   test("no TMDB key: no genre dropdown", () => withApp(baseSeed(), async ({ page }) => {
     assert.equal(await page.isVisible("#genre"), false);
   }, { tmdb: false }));
+});
+
+describe("genre Go button", () => {
+  test("choosing a genre does nothing until Go, which lights up while there's a change", () => withApp(baseSeed(), async ({ page }) => {
+    const first = await topTitle(page);
+    const lit = () => page.$eval("#apply-genre", (b) => b.classList.contains("primary"));
+    assert.equal(await lit(), false);
+    await page.selectOption("#genre", "comedy");
+    assert.equal(await lit(), true, "Go lights up");
+    await settle(page);
+    assert.equal(await topTitle(page), first, "deck unchanged before Go");
+    assert.equal(await page.$eval("#genre", (g) => g.classList.contains("on")), false, "not highlighted before Go");
+    await page.click("#apply-genre");
+    await page.waitForFunction(() => /\[g35\]|^Inception$/.test(document.querySelector("#deck .mcard.top h2")?.textContent ?? ""));
+    assert.equal(await lit(), false, "Go dims once applied");
+    await page.selectOption("#genre", "");
+    await page.selectOption("#genre", "comedy");
+    assert.equal(await lit(), false, "back to the applied genre: nothing to apply");
+  }));
+});
+
+describe("skip", () => {
+  test("Skip moves the card to the back without saving, and undo brings it back", () => withApp(baseSeed(), async ({ page, db }) => {
+    const first = await topTitle(page);
+    const before = (await db()).swipes.length;
+    await page.click("#skip");
+    await settle(page);
+    assert.notEqual(await topTitle(page), first);
+    assert.equal((await db()).swipes.length, before, "nothing saved");
+    assert.equal(await page.isDisabled("#undo"), false);
+    await page.click("#undo");
+    await settle(page);
+    assert.equal(await topTitle(page), first, "undo brings it back");
+    await page.keyboard.press("s");
+    await settle(page);
+    assert.notEqual(await topTitle(page), first, "s key skips too");
+    await page.click("[data-swipe=no]");
+    await settle(page);
+    assert.notEqual(await topTitle(page), first, "skipped card stays at the back");
+  }));
+});
+
+describe("search button in the header", () => {
+  test("opens from any tab and is hidden before you're in a household", () => withApp(baseSeed(), async ({ page }) => {
+    assert.equal(await page.textContent("#open-search"), "🔍 Search");
+    await tab(page, "matches");
+    await page.click("#open-search");
+    assert.equal(await page.isVisible("#search-form [name=q]"), true);
+    await page.click("#close-search");
+    await page.click("#logout");
+    await page.waitForSelector("#auth-form");
+    assert.equal(await page.isVisible("#open-search"), false);
+  }));
 });
 
 describe("fuzzy search", () => {

@@ -13,7 +13,8 @@ A swipe app for two people sharing a couch. Each of you swipes through movies an
   Tap a face to see that person's latest movies and shows (newest first) and swipe on those too. Tap anywhere else for
   the full story. The deck starts with titles from the last 2 years, then all-time favourites; filter to All / Movies / Shows.
   Titles your partner said yes to jump to the front with a "💕 wants to watch" note. There are buttons and arrow keys too,
-  plus ↶ undo. **🔍 Find** searches for a specific title.
+  plus ⏭ skip (moves the card to the back without saving anything) and ↶ undo. Pick a genre and tap **Go** to
+  only see that genre. **🔍 Search** (top of the screen) finds a specific title.
 - **💕 Matches**: everything you *both* swiped right on, shown live on both phones with an "It's a match!" toast.
   🎲 **Pick one** chooses for tonight. Below that: what your partner wants that you haven't said yes to, and what only you want.
 - **✨ For you two**: titles similar to what either of you liked (TMDB recommendations for each ♥/👍), plus other work by

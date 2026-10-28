@@ -28,7 +28,7 @@ let state = freshState();
 function freshState() {
   return {
     user: null, member: null, household: null, members: [], titles: [], swipes: [],
-    filter: "all", feeds: {}, pending: new Map(), undo: [], front: null, mineTab: "yes",
+    filter: "all", feeds: {}, pending: new Map(), skipped: new Set(), undo: [], front: null, mineTab: "yes",
     matchIds: null, picked: null,
   };
 }
@@ -129,10 +129,16 @@ function showMain() {
   genreSel.hidden = !TMDB_KEY;
   try { genreSel.value = localStorage.getItem("genre") ?? ""; } catch {}
   if (!GENRES[genreSel.value]) genreSel.value = "";
+  // Picking a genre only takes effect when you tap Go, which lights up while there's a change to apply.
+  const applyBtn = $("#apply-genre");
+  applyBtn.hidden = !TMDB_KEY;
+  let genre = genreSel.value;
+  const markPending = () => applyBtn.classList.toggle("primary", genreSel.value !== genre);
   const setFilter = () => {
     const media = $("#filter .active")?.dataset.filter ?? "all";
-    state.filter = filterKey(media, genreSel.value);
-    genreSel.classList.toggle("on", !!genreSel.value);
+    state.filter = filterKey(media, genre);
+    genreSel.classList.toggle("on", !!genre);
+    markPending();
     renderDeck();
   };
   $("#filter").addEventListener("click", (e) => {
@@ -141,11 +147,13 @@ function showMain() {
     $("#filter").querySelectorAll("button").forEach((x) => x.classList.toggle("active", x === b));
     setFilter();
   });
-  genreSel.addEventListener("change", () => {
-    try { localStorage.setItem("genre", genreSel.value); } catch {}
+  genreSel.addEventListener("change", markPending);
+  applyBtn.addEventListener("click", () => {
+    genre = genreSel.value;
+    try { localStorage.setItem("genre", genre); } catch {}
     setFilter();
   });
-  if (genreSel.value) setFilter();
+  if (genre) setFilter();
   $("#mine-tabs").addEventListener("click", (e) => {
     const b = e.target.closest("[data-choice]");
     if (!b) return;
@@ -156,6 +164,7 @@ function showMain() {
 
   app.querySelectorAll("[data-swipe]").forEach((b) => b.addEventListener("click", () => swipeTop(b.dataset.swipe)));
   $("#undo").addEventListener("click", undo);
+  $("#skip").addEventListener("click", () => swipeTop("skip"));
   $("#pick").addEventListener("click", pickOne);
   setupDrag($("#deck"));
   setupSearch();
@@ -187,6 +196,7 @@ function onKey(e) {
   if (e.target.closest?.("input, select, textarea")) return;
   const choice = { ArrowLeft: "no", ArrowRight: "yes", ArrowUp: "liked", ArrowDown: "disliked" }[e.key];
   if (choice) { e.preventDefault(); swipeTop(choice); }
+  else if (e.key === "s") { e.preventDefault(); swipeTop("skip"); }
   else if (e.key === "Backspace" || (e.key === "z" && (e.metaKey || e.ctrlKey))) { e.preventDefault(); undo(); }
 }
 
@@ -406,6 +416,9 @@ function currentDeck(filter = state.filter) {
   const onScreen = swiping && shown.filter === filter ? shown.keys : [];
   const at = (t) => { const i = onScreen.indexOf(t.key); return i < 0 ? Infinity : i; };
   deck.sort((a, b) => at(a) - at(b));
+  // Skipped cards go to the back for now; nothing is saved, so they're back next visit.
+  const skipped = (t) => (state.skipped.has(t.key) ? 1 : 0);
+  deck.sort((a, b) => skipped(a) - skipped(b));
   if (state.front) {
     const i = deck.findIndex((t) => t.key === state.front);
     if (i > 0) deck.unshift(...deck.splice(i, 1));
@@ -438,7 +451,7 @@ async function renderDeck() {
     const { media, genre } = parseFilter(filter);
     const what = [genre ? GENRES[genre].label.toLowerCase() : "", media === "all" ? "" : media === "tv" ? "shows" : "movies"].filter(Boolean).join(" ");
     el.innerHTML = `<div class="empty"><div class="big">🍿</div><p>You've swiped through everything${what ? ` in ${esc(what)}` : ""}.</p>
-       <p class="muted small">Try another filter, or tap 🔍 Find to add something.</p></div>`;
+       <p class="muted small">Try another filter, or tap 🔍 Search to add something.</p></div>`;
     return;
   }
   // Reuse a card's element while what it shows is unchanged, so its poster never reloads;
@@ -564,8 +577,8 @@ function place(card, dx, dy) {
 function swipeTop(choice) {
   const card = topCard();
   if (!card || flying || drag) return;
-  const nudge = { yes: [40, 0], no: [-40, 0], liked: [0, -40], disliked: [0, 40] }[choice];
-  card.querySelector(`.s-${choice}`).style.opacity = 1;
+  const nudge = { yes: [40, 0], no: [-40, 0], liked: [0, -40], disliked: [0, 40], skip: [0, 0] }[choice];
+  card.querySelector(`.s-${choice}`)?.style.setProperty("opacity", 1);
   fly(card, choice, ...nudge);
 }
 
@@ -575,11 +588,12 @@ function fly(card, choice, dx, dy) {
   const w = window.innerWidth * 1.5, h = window.innerHeight * 1.2;
   const to = { yes: [w, dy], no: [-w, dy], liked: [dx, -h], disliked: [dx, h] }[choice];
   card.style.transition = "transform .28s ease-out, opacity .28s ease-out";
-  card.style.transform = `translate(${to[0]}px, ${to[1]}px) rotate(${to[0] / 30}deg)`;
+  card.style.transform = to ? `translate(${to[0]}px, ${to[1]}px) rotate(${to[0] / 30}deg)` : "scale(.85) translateY(24px)";
   card.style.opacity = "0";
   setTimeout(() => {
     flying = false;
-    if (item) commit(item, choice);
+    if (item && choice === "skip") skip(item);
+    else if (item) commit(item, choice);
     else renderDeck();
   }, 260);
 }
@@ -610,6 +624,16 @@ async function commit(item, choice) {
   renderDeck();
 }
 
+// Skip: no swipe is saved, the card just moves to the back of the deck. Undo brings it back.
+function skip(item) {
+  swiping = true;
+  if (state.front === item.key) state.front = null;
+  state.skipped.add(item.key);
+  state.undo.push({ key: item.key, skip: true });
+  if (state.undo.length > 20) state.undo.shift();
+  renderDeck();
+}
+
 const titlePayload = (t) => ({
   key: t.key, media_type: t.media_type, tmdb_id: t.tmdb_id ?? null, title: t.title,
   year: t.year ?? null, poster: t.poster ?? null, overview: t.overview ?? null, rating: t.rating ?? null,
@@ -619,6 +643,12 @@ const titlePayload = (t) => ({
 async function undo() {
   const job = state.undo.pop();
   if (!job) return;
+  if (job.skip) {
+    state.skipped.delete(job.key);
+    state.front = job.key;
+    renderDeck();
+    return;
+  }
   const { data: id } = await job.saved;
   if (id) await sb.from("swipes").delete().eq("title_id", id).eq("user_id", state.user.id);
   state.pending.delete(job.key);
@@ -727,12 +757,13 @@ function setupSearch() {
   const form = $("#search-form");
   form.media.hidden = !!TMDB_KEY;
   form.q.placeholder = TMDB_KEY ? "Search movies & shows…" : "Movie or show name";
-  $("#open-search").addEventListener("click", () => {
+  // The Search button lives in the header, outside the main screen, so assign rather than add a listener per login.
+  $("#open-search").onclick = () => {
     $("#results").innerHTML = "";
     form.reset();
     dlg.showModal();
     form.q.focus();
-  });
+  };
   $("#close-search").addEventListener("click", () => dlg.close());
   dlg.addEventListener("close", () => renderDeck());
 

@@ -85,7 +85,26 @@ button:disabled { opacity: .45; cursor: default; }
 .tabs button { flex: 1; white-space: nowrap; padding-inline: 8px; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .tabs button.active { background: var(--text); color: var(--bg); border-color: var(--text); }
 #auth-form .primary, #create-form .primary, #join-form button { width: 100%; }
-#who { display: flex; align-items: center; gap: 6px; font-size: .9rem; white-space: nowrap; }
+#who { display: flex; align-items: center; gap: 10px; font-size: .9rem; white-space: nowrap; }
+/* When space runs out, a long username is shortened rather than the title */
+header h1 { flex: 0 0 auto; }
+#who { min-width: 0; }
+#who .acct { display: flex; align-items: center; gap: 6px; min-width: 0; }
+#open-search { flex: 0 0 auto; min-height: 40px; padding: 6px 12px; font-size: .9rem; border-radius: 12px; }
+body:not(.in-app) #open-search { display: none; }
+header h1 .short { display: none; }
+#who-name { display: inline-block; vertical-align: bottom; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+/* The full title, Search and the account only share a row on wider screens */
+@media (max-width: 600px) {
+  header h1 .full { display: none; }
+  header h1 .short { display: inline; }
+}
+@media (max-width: 360px) {
+  header { gap: 8px; }
+  body header h1 { font-size: .9rem; }
+  #who { gap: 6px; }
+  #open-search { padding: 6px 7px; font-size: .82rem; }
+}
 
 /* Segmented control */
 .seg { display: inline-flex; background: var(--chip); border-radius: 12px; padding: 3px; gap: 2px; }
@@ -145,24 +164,27 @@ body.swiping main { padding-bottom: 0; }
 .deck-bar .seg { flex: 0 0 auto; }
 /* All three bar controls share one height; the select draws its own chevron because
    iOS Safari's native select ignores min-height and renders shorter than the buttons. */
-.deck-bar .seg, #genre, #open-search { height: 42px; }
+.deck-bar .seg, #genre, #apply-genre { height: 42px; }
+.genre-pick { flex: 1 1 auto; min-width: 0; max-width: 300px; display: flex; gap: 6px; }
 #genre {
-  flex: 1 1 auto; min-width: 0; width: 100%; max-width: 220px; min-height: 0; padding: 6px 26px 6px 10px; font-size: .9rem;
+  flex: 1 1 auto; min-width: 0; width: 100%; min-height: 0; padding: 6px 26px 6px 10px; font-size: .9rem;
   -webkit-appearance: none; appearance: none; border-radius: 12px; border-color: transparent; text-overflow: ellipsis;
   background: var(--chip) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23999' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 10px center;
 }
 #genre.on { background-color: var(--accent); color: var(--accent-text); font-weight: 600; }
-#open-search { flex: 0 0 auto; min-height: 0; padding: 6px 12px; font-size: .9rem; border-radius: 12px; }
+#apply-genre { flex: 0 0 auto; min-height: 0; padding: 6px 12px; font-size: .9rem; font-weight: 600; border-radius: 12px; }
+#apply-genre:not(.primary) { color: var(--muted); }
 /* Narrow phones: tighter tabs, and Find as just the icon */
 @media (max-width: 400px) {
   .deck-bar { gap: 6px; }
   .deck-bar .seg button { padding: 6px 8px; font-size: .85rem; }
-  #open-search { font-size: 0; padding: 6px 10px; }
-  #open-search::first-letter { font-size: 1rem; }
+  #apply-genre { padding: 6px 10px; }
 }
 @media (max-width: 340px) {
-  .deck-bar .seg button { padding: 6px 7px; font-size: .8rem; }
-  #genre { padding: 6px 22px 6px 8px; font-size: .85rem; background-position: right 8px center; }
+  .deck-bar, .genre-pick { gap: 5px; }
+  .deck-bar .seg button { padding: 6px 6px; font-size: .8rem; }
+  #genre { padding: 6px 20px 6px 7px; font-size: .82rem; background-position: right 7px center; }
+  #apply-genre { padding: 6px 9px; }
 }
 .deck { position: relative; flex: 1; min-height: 0; container-type: size; }
 .deck .empty { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; padding: 24px; }
@@ -293,14 +315,20 @@ dialog.sheet > *, dialog#search > * { flex-shrink: 0; }
 .act.yes { color: var(--yes); border-color: color-mix(in srgb, var(--yes) 40%, var(--border)); width: 64px; height: 64px; font-size: 1.8rem; }
 .act.liked { border-color: color-mix(in srgb, var(--liked) 45%, var(--border)); }
 .act.disliked { border-color: color-mix(in srgb, var(--disliked) 45%, var(--border)); }
-.act.undo { width: 42px; height: 42px; font-size: 1.1rem; color: var(--muted); }
+.act.small { width: 42px; height: 42px; font-size: 1.1rem; color: var(--muted); }
 .act { flex: 0 0 auto; }
-/* Narrow phones (iPhone SE): slightly smaller buttons so all five fit at a tappable size */
-@media (max-width: 360px) {
+/* Phones: smaller buttons so all six fit at a tappable size, down to a 320px iPhone SE */
+@media (max-width: 420px) {
   .actions { gap: 8px; }
-  .act { width: 50px; height: 50px; font-size: 1.3rem; }
-  .act.yes { width: 56px; height: 56px; font-size: 1.6rem; }
-  .act.undo { width: 40px; height: 40px; }
+  .act { width: 52px; height: 52px; font-size: 1.35rem; }
+  .act.yes { width: 58px; height: 58px; font-size: 1.6rem; }
+  .act.small { width: 42px; height: 42px; font-size: 1.05rem; }
+}
+@media (max-width: 360px) {
+  .actions { gap: 5px; }
+  .act { width: 46px; height: 46px; font-size: 1.2rem; }
+  .act.yes { width: 52px; height: 52px; font-size: 1.45rem; }
+  .act.small { width: 40px; height: 40px; font-size: 1rem; }
 }
 .hint { margin: 0; text-align: center; font-size: .75rem; color: var(--muted); }
 /* Short screens: the buttons already say it, give the card the room */
@@ -336,10 +364,11 @@ dialog.sheet > *, dialog#search > * { flex-shrink: 0; }
 @media (max-width: 420px) {
   header { padding-top: 12px; }
   header h1 { font-size: 1.05rem; }
-  #who { flex-direction: column; align-items: flex-end; gap: 0; font-size: .85rem; }
+  #who { gap: 8px; font-size: .85rem; }
+  #who .acct { flex-direction: column; align-items: flex-end; gap: 0; }
+  #open-search { padding: 6px 10px; }
   main { padding-inline: 12px; }
   .card { padding: 12px; border-radius: 12px; }
   .choices { gap: 2px; }
   .choices button { min-width: 36px; }
-  .actions { gap: 10px; }
 }

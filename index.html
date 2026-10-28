@@ -15,8 +15,11 @@
 </head>
 <body>
   <header>
-    <h1>🍿 What are we watching next?</h1>
-    <div id="who" hidden><span id="who-name"></span> <button id="logout" class="link">Log out</button></div>
+    <h1>🍿 <span class="full">What are we watching next?</span><span class="short">Watching next?</span></h1>
+    <div id="who" hidden>
+      <button id="open-search" aria-label="Search for a title">🔍 Search</button>
+      <div class="acct"><span id="who-name"></span> <button id="logout" class="link">Log out</button></div>
+    </div>
   </header>
 
   <main id="app">
@@ -81,14 +84,17 @@
           <button data-filter="movie">Movies</button>
           <button data-filter="tv">Shows</button>
         </div>
-        <select id="genre" aria-label="Genre"></select>
-        <button id="open-search" aria-label="Find a title">🔍 Find</button>
+        <div class="genre-pick">
+          <select id="genre" aria-label="Genre"></select>
+          <button id="apply-genre" aria-label="Show this genre">Go</button>
+        </div>
       </div>
       <div id="deck" class="deck" aria-live="polite"></div>
       <div class="actions">
         <button data-swipe="no" class="act no" aria-label="Not interested (swipe left)">✕</button>
         <button data-swipe="disliked" class="act disliked" aria-label="Watched, didn't like (swipe down)">👎</button>
-        <button id="undo" class="act undo" aria-label="Undo last swipe" disabled>↶</button>
+        <button id="undo" class="act small undo" aria-label="Undo last swipe" disabled>↶</button>
+        <button id="skip" class="act small skip" aria-label="Skip for now">⏭</button>
         <button data-swipe="liked" class="act liked" aria-label="Watched and liked (swipe up)">👍</button>
         <button data-swipe="yes" class="act yes" aria-label="Interested (swipe right)">♥</button>
       </div>

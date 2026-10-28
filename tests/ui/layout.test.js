@@ -113,14 +113,26 @@ for (const [name, width, height] of SIZES) {
         assert.deepEqual(await page.evaluate(sideways), [], "sideways");
         const bar = await page.evaluate(() => {
           const r = (s) => document.querySelector(s).getBoundingClientRect();
-          const seg = r("#filter"), genre = r("#genre"), find = r("#open-search");
-          return { heights: [seg.height, genre.height, find.height].map(Math.round), genreLabel: document.querySelector("#genre").selectedOptions[0].textContent, genreW: genre.width, overlap: seg.right > genre.left + 1 || genre.right > find.left + 1, tabsFit: [...document.querySelectorAll("#filter button")].every((b) => b.scrollWidth <= b.clientWidth + 1) };
+          const seg = r("#filter"), genre = r("#genre"), go = r("#apply-genre"), deck = r(".deck-bar");
+          const h1 = document.querySelector("header h1"), search = r("#open-search"), acct = r("#who .acct");
+          const acts = [...document.querySelectorAll(".actions .act")].map((b) => b.getBoundingClientRect());
+          return { heights: [seg.height, genre.height, go.height].map(Math.round), genreLabel: document.querySelector("#genre").selectedOptions[0].textContent, genreW: genre.width,
+            overlap: seg.right > genre.left + 1 || genre.right > go.left + 1 || go.right > deck.right + 1,
+            header: { titleClipped: h1.scrollWidth > h1.clientWidth + 1, titleRight: h1.getBoundingClientRect().right, search, acct, vw: innerWidth },
+            acts: { n: acts.length, overlap: acts.some((a, i) => i && a.left < acts[i - 1].right - 1), left: acts[0].left, right: acts.at(-1).right }, tabsFit: [...document.querySelectorAll("#filter button")].every((b) => b.scrollWidth <= b.clientWidth + 1) };
         });
         assert.ok(bar.genreW >= 72, `genre dropdown squeezed to ${bar.genreW}px`);
         assert.equal(bar.overlap, false, "deck bar items overlap");
         assert.equal(bar.tabsFit, true, "All/Movies/Shows labels cut off");
         assert.ok(Math.max(...bar.heights) - Math.min(...bar.heights) <= 1, `deck bar controls differ in height: ${bar.heights}`);
         assert.equal(bar.genreLabel, "All genres");
+        const hd = bar.header;
+        assert.equal(hd.titleClipped, false, "app title cut off");
+        assert.ok(hd.titleRight <= hd.search.left + 1 && hd.search.right <= hd.acct.left + 1 && hd.acct.right <= hd.vw + 1, "header: title, Search and account overlap or run off screen");
+        assert.ok(hd.search.width >= 40 && hd.search.height >= 36, `Search button too small (${Math.round(hd.search.width)}×${Math.round(hd.search.height)})`);
+        assert.equal(bar.acts.n, 6, "six action buttons");
+        assert.equal(bar.acts.overlap, false, "action buttons overlap");
+        assert.ok(bar.acts.left >= 0 && bar.acts.right <= hd.vw, "action buttons run off screen");
         const m = await page.evaluate(() => {
           const q = (s) => document.querySelector(s)?.getBoundingClientRect();
           const faces = [...document.querySelectorAll("#deck .mcard.top .face")].map((f) => f.getBoundingClientRect()).filter((b) => b.height);
